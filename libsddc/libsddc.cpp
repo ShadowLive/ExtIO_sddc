@@ -1,6 +1,5 @@
 #include "libsddc.h"
 #include "config.h"
-#include "r2iq.h"
 #include "RadioHandler.h"
 #include <cmath>
 
@@ -18,25 +17,53 @@ struct sddc
 
 sddc_t *current_running;
 
+// Ring buffer for synchronous reads
+#include <mutex>
+#include <condition_variable>
+#include <cstring>
+#include <chrono>
+#include <algorithm>
+
+static std::mutex sync_mutex;
+static std::condition_variable sync_cv;
+static uint8_t sync_buffer[1024 * 1024];  // 1MB buffer
+static size_t sync_write_pos = 0;
+static size_t sync_read_pos = 0;
+static size_t sync_available = 0;
+
 static void Callback(void* context, const float* data, uint32_t len)
 {
+    if (!current_running) return;
+
+    // Forward to user callback if set
+    if (current_running->callback) {
+        // Convert float samples to int16 for the callback
+        // The callback expects uint8_t* but data is float*
+        // For now, pass as-is since the callback format isn't well-defined
+        current_running->callback(len * sizeof(float), (uint8_t*)data,
+                                  current_running->callback_context);
+    }
+
+    // Store in sync buffer for sddc_read_sync
+    {
+        std::lock_guard<std::mutex> lock(sync_mutex);
+        size_t bytes = len * sizeof(float);
+        size_t buffer_size = sizeof(sync_buffer);
+
+        // Write to ring buffer
+        for (size_t i = 0; i < bytes; i++) {
+            sync_buffer[sync_write_pos] = ((uint8_t*)data)[i];
+            sync_write_pos = (sync_write_pos + 1) % buffer_size;
+            if (sync_available < buffer_size) {
+                sync_available++;
+            } else {
+                // Buffer overflow - advance read position
+                sync_read_pos = (sync_read_pos + 1) % buffer_size;
+            }
+        }
+    }
+    sync_cv.notify_one();
 }
-
-class rawdata : public r2iqControlClass {
-    void Init(float gain, ringbuffer<int16_t>* buffers, ringbuffer<float>* obuffers) override
-    {
-        idx = 0;
-    }
-
-    void TurnOn() override
-    {
-        this->r2iqOn = true;
-        idx = 0;
-    }
-
-private:
-    int idx;
-};
 
 int sddc_get_device_count()
 {
@@ -95,7 +122,7 @@ sddc_t *sddc_open(int index, const char* imagefile)
 
     ret_val->handler = new RadioHandlerClass();
 
-    if (ret_val->handler->Init(fx3, Callback, new rawdata()))
+    if (ret_val->handler->Init(fx3, Callback, nullptr))
     {
         ret_val->status = SDDC_STATUS_READY;
         ret_val->samplerateidx = 0;
@@ -454,5 +481,29 @@ int sddc_reset_status(sddc_t *t)
 
 int sddc_read_sync(sddc_t *t, uint8_t *data, int length, int *transferred)
 {
+    std::unique_lock<std::mutex> lock(sync_mutex);
+
+    // Wait for data with timeout
+    if (sync_available == 0) {
+        sync_cv.wait_for(lock, std::chrono::milliseconds(1000),
+                         []{ return sync_available > 0; });
+    }
+
+    if (sync_available == 0) {
+        *transferred = 0;
+        return 0;  // Timeout, no data
+    }
+
+    // Read available data
+    size_t to_read = std::min((size_t)length, sync_available);
+    size_t buffer_size = sizeof(sync_buffer);
+
+    for (size_t i = 0; i < to_read; i++) {
+        data[i] = sync_buffer[sync_read_pos];
+        sync_read_pos = (sync_read_pos + 1) % buffer_size;
+    }
+    sync_available -= to_read;
+
+    *transferred = (int)to_read;
     return 0;
 }
