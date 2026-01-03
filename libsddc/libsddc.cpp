@@ -2,6 +2,7 @@
 #include "config.h"
 #include "r2iq.h"
 #include "RadioHandler.h"
+#include <cmath>
 
 struct sddc
 {
@@ -282,36 +283,97 @@ int sddc_set_tuner_frequency(sddc_t *t, double frequency)
     return 0;
 }
 
+// Static storage for step values converted to double
+static double rf_steps_double[64];
+static double if_steps_double[64];
+static int current_rf_idx = 0;
+static int current_if_idx = 0;
+
 int sddc_get_tuner_rf_attenuations(sddc_t *t, const double *attenuations[])
 {
-    return 0;
+    const float *steps;
+    int count = t->handler->GetRFAttSteps(&steps);
+    if (count > 64) count = 64;
+    for (int i = 0; i < count; i++) {
+        rf_steps_double[i] = steps[i];
+    }
+    *attenuations = rf_steps_double;
+    return count;
 }
 
 double sddc_get_tuner_rf_attenuation(sddc_t *t)
 {
+    const float *steps;
+    int count = t->handler->GetRFAttSteps(&steps);
+    if (current_rf_idx >= 0 && current_rf_idx < count) {
+        return steps[current_rf_idx];
+    }
     return 0;
 }
 
 int sddc_set_tuner_rf_attenuation(sddc_t *t, double attenuation)
 {
-    //TODO, convert double to index
-    t->handler->UpdateattRF(5);
+    const float *steps;
+    int count = t->handler->GetRFAttSteps(&steps);
+    if (count <= 0) return -1;
+
+    // Find closest step
+    int best_idx = 0;
+    double best_diff = fabs(steps[0] - attenuation);
+    for (int i = 1; i < count; i++) {
+        double diff = fabs(steps[i] - attenuation);
+        if (diff < best_diff) {
+            best_diff = diff;
+            best_idx = i;
+        }
+    }
+
+    current_rf_idx = best_idx;
+    t->handler->UpdateattRF(best_idx);
     return 0;
 }
 
 int sddc_get_tuner_if_attenuations(sddc_t *t, const double *attenuations[])
 {
-    // TODO
-    return 0;
+    const float *steps;
+    int count = t->handler->GetIFGainSteps(&steps);
+    if (count > 64) count = 64;
+    for (int i = 0; i < count; i++) {
+        if_steps_double[i] = steps[i];
+    }
+    *attenuations = if_steps_double;
+    return count;
 }
 
 double sddc_get_tuner_if_attenuation(sddc_t *t)
 {
+    const float *steps;
+    int count = t->handler->GetIFGainSteps(&steps);
+    if (current_if_idx >= 0 && current_if_idx < count) {
+        return steps[current_if_idx];
+    }
     return 0;
 }
 
 int sddc_set_tuner_if_attenuation(sddc_t *t, double attenuation)
 {
+    const float *steps;
+    int count = t->handler->GetIFGainSteps(&steps);
+    if (count <= 0) return -1;
+
+    // Find closest step
+    int best_idx = 0;
+    double best_diff = fabs(steps[0] - attenuation);
+    for (int i = 1; i < count; i++) {
+        double diff = fabs(steps[i] - attenuation);
+        if (diff < best_diff) {
+            best_diff = diff;
+            best_idx = i;
+        }
+    }
+
+    current_if_idx = best_idx;
+    t->handler->UpdateIFGain(best_idx);
     return 0;
 }
 
