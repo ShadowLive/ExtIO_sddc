@@ -17,6 +17,7 @@ fx3class *CreateUsbHandler()
 
 fx3handler::fx3handler()
 {
+    devidx = 0;
     usb_device_infos = nullptr;
     dev = nullptr;
 }
