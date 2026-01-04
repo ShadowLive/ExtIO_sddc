@@ -190,3 +190,13 @@ bool RX888R2Radio::UpdateGainIF(int gain_index)
         return Fx3->SetArgument(R82XX_VGA, (uint16_t)gain_index);
     }
 }
+
+bool RX888R2Radio::SetVgaGain(uint8_t gain)
+{
+    // Set AD8370 VGA gain directly
+    // gain is 8-bit value: MSB=1 for high gain mode, bits 0-6 = gain code (0-127)
+    // High gain mode: 6 dB to 34 dB
+    // Low gain mode: -11 dB to 17 dB
+    fprintf(stderr, "RX888R2: Setting AD8370 VGA gain to 0x%02x\n", gain);
+    return Fx3->SetArgument(AD8340_VGA, gain);
+}

@@ -263,10 +263,10 @@ bool RadioHandlerClass::UpdatemodeRF(rf_mode mode)
 
 		hardware->UpdatemodeRF(mode);
 
-		if (mode == VHFMODE)
-			r2iqCntrl->setSideband(true);
-		else
-			r2iqCntrl->setSideband(false);
+		// FIX: Do NOT use sideband inversion for R828D tuner
+		// R828D uses low-side injection so spectrum is not inverted at IF
+		// Original code incorrectly used sideband=true which mirrored the spectrum
+		r2iqCntrl->setSideband(false);
 	}
 	return true;
 }
@@ -286,8 +286,8 @@ uint64_t RadioHandlerClass::TuneLO(uint64_t wishedFreq)
 	int64_t offset = wishedFreq - actLo;
 	DbgPrintf("Offset freq %" PRIi64 "\n", offset);
 	float fc = r2iqCntrl->setFreqOffset(offset / (getSampleRate() / 2.0f));
-	if (GetmodeRF() == VHFMODE)
-		fc = -fc;   // sign change with sideband used
+	// FIX: Removed fc negation for VHF mode since we disabled sideband inversion
+	// Original code negated fc when sideband=true, but we now use sideband=false
 	if (this->fc != fc)
 	{
 		std::unique_lock<std::mutex> lk(fc_mutex);
@@ -316,6 +316,12 @@ bool RadioHandlerClass::UptPga(bool b)
 	else
 		hardware->FX3UnsetGPIO(PGA_EN);
 	return pga;
+}
+
+bool RadioHandlerClass::SetVgaGain(uint8_t gain)
+{
+	vga_gain = gain;
+	return hardware->SetVgaGain(gain);
 }
 
 bool RadioHandlerClass::UptRand(bool b)

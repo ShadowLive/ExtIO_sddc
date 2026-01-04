@@ -49,6 +49,8 @@ public:
     bool GetDither () {return dither;}
     bool UptPga(bool b);
     bool GetPga() { return pga;}
+    bool SetVgaGain(uint8_t gain);
+    uint8_t GetVgaGain() const { return vga_gain; }
     bool UptRand (bool b);
     bool GetRand () {return randout;}
     uint16_t GetFirmware() { return firmware; }
@@ -100,6 +102,7 @@ private:
     bool randout;
     bool biasT_HF;
     bool biasT_VHF;
+    uint8_t vga_gain;
     uint16_t firmware;
     rf_mode modeRF;
     RadioModel radio;
@@ -146,6 +149,7 @@ public:
     virtual int getRFSteps(const float** steps ) const { return 0; }
     virtual int getIFSteps(const float** steps ) const { return 0; }
     virtual bool UpdateGainIF(int attIndex) { return false; }
+    virtual bool SetVgaGain(uint8_t gain) { return false; }
 
     bool FX3producerOn() { return Fx3->Control(STARTFX3); }
     bool FX3producerOff() { return Fx3->Control(STOPFX3); }
@@ -204,6 +208,7 @@ public:
     uint64_t TuneLo(uint64_t freq) override;
     bool UpdateattRF(int attIndex) override;
     bool UpdateGainIF(int attIndex) override;
+    bool SetVgaGain(uint8_t gain) override;
 
     int getRFSteps(const float** steps ) const override;
     int getIFSteps(const float** steps ) const override;

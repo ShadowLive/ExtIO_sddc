@@ -335,6 +335,30 @@ int sddc_set_adc_random(sddc_t *t, int random)
     return 0;
 }
 
+/* PGA (Programmable Gain Amplifier) functions */
+int sddc_get_pga(sddc_t *t)
+{
+    return t->handler->GetPga();
+}
+
+int sddc_set_pga(sddc_t *t, int enable)
+{
+    t->handler->UptPga(enable != 0);
+    return 0;
+}
+
+/* AD8370 VGA (Variable Gain Amplifier) functions */
+uint8_t sddc_get_vga_gain(sddc_t *t)
+{
+    return t->handler->GetVgaGain();
+}
+
+int sddc_set_vga_gain(sddc_t *t, uint8_t gain)
+{
+    t->handler->SetVgaGain(gain);
+    return 0;
+}
+
 /* HF block functions */
 double sddc_get_hf_attenuation(sddc_t *t)
 {

@@ -110,6 +110,25 @@ int sddc_get_adc_random(sddc_t *t);
 int sddc_set_adc_random(sddc_t *t, int random);
 
 
+/* PGA (Programmable Gain Amplifier) functions */
+int sddc_get_pga(sddc_t *t);
+
+int sddc_set_pga(sddc_t *t, int enable);
+
+/* AD8370 VGA (Variable Gain Amplifier) functions
+ * Direct control of the AD8370 VGA gain.
+ * gain is an 8-bit value:
+ *   Bit 7 (MSB): 0=low gain mode, 1=high gain mode
+ *   Bits 0-6: Gain code (0-127)
+ * High gain mode: 6 dB to 34 dB
+ * Low gain mode: -11 dB to 17 dB
+ * Maximum gain: 0xFF (high mode, gain code 127) = 34 dB
+ */
+uint8_t sddc_get_vga_gain(sddc_t *t);
+
+int sddc_set_vga_gain(sddc_t *t, uint8_t gain);
+
+
 /* HF block functions */
 double sddc_get_hf_attenuation(sddc_t *t);
 
