@@ -201,8 +201,21 @@ FAIL3:
 
   *usb_device_infos = device_infos;
   ret_val = count;
+  goto CLEANUP;
 
 FAIL2:
+  /* Clean up any allocated device_infos entries before freeing the array */
+  for (int k = 0; k < count; k++) {
+    if (device_infos[k].manufacturer)
+      free(device_infos[k].manufacturer);
+    if (device_infos[k].product)
+      free(device_infos[k].product);
+    if (device_infos[k].serial_number)
+      free(device_infos[k].serial_number);
+  }
+  free(device_infos);
+
+CLEANUP:
   libusb_free_device_list(list, 1);
 FAIL1:
   libusb_exit(0);

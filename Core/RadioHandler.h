@@ -1,13 +1,14 @@
 #ifndef RADIOHANDLER_H
 #define RADIOHANDLER_H
 
-#include "license.txt" 
+#include "license.txt"
 
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+#include <atomic>
 #include "FX3Class.h"
 
 #include "dsp/ringbuffer.h"
@@ -91,7 +92,7 @@ private:
     void (*DbgPrintFX3)(const char* fmt, ...);
     bool (*GetConsoleIn)(char* buf, int maxlen);
 
-    bool run;
+    std::atomic<bool> run;
     unsigned long count;    // absolute index
 
     bool pga;

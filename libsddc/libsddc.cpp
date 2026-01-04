@@ -45,9 +45,10 @@ static void Callback(void* context, const float* data, uint32_t len)
     }
 
     // Store in sync buffer for sddc_read_sync
+    // len = number of complex samples, each complex = 2 floats (I + Q)
     {
         std::lock_guard<std::mutex> lock(sync_mutex);
-        size_t bytes = len * sizeof(float);
+        size_t bytes = len * 2 * sizeof(float);  // Complex samples: 2 floats each
         size_t buffer_size = sizeof(sync_buffer);
 
         // Write to ring buffer
@@ -197,11 +198,15 @@ int sddc_set_rf_mode(sddc_t *t, enum RFMode rf_mode)
     switch (rf_mode)
     {
     case VHF_MODE:
+        fprintf(stderr, "libsddc: Setting VHF mode (VHF antenna port)\n");
         t->handler->UpdatemodeRF(VHFMODE);
         break;
     case HF_MODE:
+        fprintf(stderr, "libsddc: Setting HF mode (HF antenna port)\n");
         t->handler->UpdatemodeRF(HFMODE);
+        break;
     default:
+        fprintf(stderr, "libsddc: Unknown RF mode %d\n", rf_mode);
         return -1;
     }
 
@@ -422,22 +427,25 @@ double sddc_get_sample_rate(sddc_t *t)
 
 int sddc_set_sample_rate(sddc_t *t, double sample_rate)
 {
+    // Sample rate indices must match RadioHandler::Start() which uses:
+    // decimate = 4 - srate_idx, giving output = 32 >> decimate MSPS
+    // This matches SoapySDDC's mapping
     switch((int64_t)sample_rate)
     {
         case 32000000:
-            t->samplerateidx = 0;
+            t->samplerateidx = 4;  // decimate=0, output=32 MSPS
             break;
         case 16000000:
-            t->samplerateidx = 1;
+            t->samplerateidx = 3;  // decimate=1, output=16 MSPS
             break;
         case 8000000:
-            t->samplerateidx = 2;
+            t->samplerateidx = 2;  // decimate=2, output=8 MSPS
             break;
         case 4000000:
-            t->samplerateidx = 3;
+            t->samplerateidx = 1;  // decimate=3, output=4 MSPS
             break;
         case 2000000:
-            t->samplerateidx = 4;
+            t->samplerateidx = 0;  // decimate=4, output=2 MSPS
             break;
         default:
             return -1;

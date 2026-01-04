@@ -65,21 +65,27 @@ bool RX888R2Radio::UpdatemodeRF(rf_mode mode)
 {
     if (mode == VHFMODE)
     {
+        fprintf(stderr, "RX888R2: Switching to VHF mode - enabling VHF_EN GPIO\n");
+
         // disable HF by set max ATT
         UpdateattRF(0);  // max att 0 -> -31.5 dB
 
         // switch to VHF Attenna
-        FX3SetGPIO(VHF_EN);
+        bool gpio_ok = FX3SetGPIO(VHF_EN);
+        fprintf(stderr, "RX888R2: VHF_EN GPIO set result: %d, gpios=0x%x\n", gpio_ok, gpios);
 
         // high gain, 0db
         uint8_t gain = 0x80 | 3;
         Fx3->SetArgument(AD8340_VGA, gain);
         // Enable Tuner reference clock
         uint32_t ref = R828D_FREQ;
-        return Fx3->Control(TUNERINIT, ref); // Initialize Tuner
+        bool tuner_ok = Fx3->Control(TUNERINIT, ref); // Initialize Tuner
+        fprintf(stderr, "RX888R2: Tuner init result: %d (ref=%u Hz)\n", tuner_ok, ref);
+        return tuner_ok;
     }
     else if (mode == HFMODE)
     {
+        fprintf(stderr, "RX888R2: Switching to HF mode - disabling VHF_EN GPIO\n");
         Fx3->Control(TUNERSTDBY); // Stop Tuner
 
         return FX3UnsetGPIO(VHF_EN);                // switch to HF Attenna
@@ -105,8 +111,12 @@ bool RX888R2Radio::UpdateattRF(int att)
     }
     else
     {
+        // this is in VHF mode - bounds check against VHF RF step size
+        if (att < 0)
+            att = 0;
+        if (att > vhf_rf_step_size - 1)
+            att = vhf_rf_step_size - 1;
         uint16_t index = att;
-        // this is in VHF mode
         return Fx3->SetArgument(R82XX_ATTENUATOR, index);
     }
 }
@@ -172,7 +182,11 @@ bool RX888R2Radio::UpdateGainIF(int gain_index)
     }
     else
     {
-        // this is in VHF mode
+        // this is in VHF mode - bounds check against VHF IF step size
+        if (gain_index < 0)
+            gain_index = 0;
+        if (gain_index > vhf_if_step_size - 1)
+            gain_index = vhf_if_step_size - 1;
         return Fx3->SetArgument(R82XX_VGA, (uint16_t)gain_index);
     }
 }

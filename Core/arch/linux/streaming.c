@@ -394,7 +394,7 @@ static void LIBUSB_CALL streaming_read_async_callback(struct libusb_transfer *tr
 
   /* cancel all the active transfers */
   for (uint32_t i = 0; i < this->num_frames; ++i) {
-    int ret = libusb_cancel_transfer(transfer);
+    int ret = libusb_cancel_transfer(this->transfers[i]);
     if (ret < 0) {
       if (ret == LIBUSB_ERROR_NOT_FOUND) {
         continue;

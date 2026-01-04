@@ -59,7 +59,7 @@ void RadioHandlerClass::OnDataPacket()
 RadioHandlerClass::RadioHandlerClass() :
 	DbgPrintFX3(nullptr),
 	GetConsoleIn(nullptr),
-	run(false),
+	run{false},
 	pga(false),
 	dither(false),
 	randout(false),
