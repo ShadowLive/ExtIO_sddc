@@ -2,14 +2,49 @@
 #include "config.h"
 #include "RadioHandler.h"
 #include <cmath>
+#include <cstring>
+#include <cstdarg>
+
+// R820T2/R828D tuner IF frequency (4.57 MHz)
+#define TUNER_IF_FREQUENCY 4570000.0
+
+// Sample rates indexed by samplerateidx (matches RadioHandler::Start decimation)
+static const double sample_rates[] = {
+    2000000.0,   // idx 0: decimate=4, 32 >> 4 = 2 MSPS
+    4000000.0,   // idx 1: decimate=3, 32 >> 3 = 4 MSPS
+    8000000.0,   // idx 2: decimate=2, 32 >> 2 = 8 MSPS
+    16000000.0,  // idx 3: decimate=1, 32 >> 1 = 16 MSPS
+    32000000.0,  // idx 4: decimate=0, 32 >> 0 = 32 MSPS
+};
+static const int num_sample_rates = sizeof(sample_rates) / sizeof(sample_rates[0]);
+
+// Error handling
+static thread_local char last_error[256] = {0};
+static thread_local int last_error_code = 0;
+
+static void set_error(int code, const char* fmt, ...) {
+    last_error_code = code;
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(last_error, sizeof(last_error), fmt, args);
+    va_end(args);
+    fprintf(stderr, "libsddc error: %s\n", last_error);
+}
+
+static void clear_error() {
+    last_error_code = 0;
+    last_error[0] = '\0';
+}
 
 struct sddc
 {
     SDDCStatus status;
     RadioHandlerClass* handler;
+    fx3class* fx3;
     uint8_t led;
     int samplerateidx;
     double freq;
+    double tuner_if_freq;  // Tuner IF frequency (configurable)
 
     sddc_read_async_cb_t callback;
     void *callback_context;
@@ -92,11 +127,14 @@ int sddc_free_device_info(struct sddc_device_info *sddc_device_infos)
 
 sddc_t *sddc_open(int index, const char* imagefile)
 {
+    clear_error();
     auto ret_val = new sddc_t();
 
     fx3class *fx3 = CreateUsbHandler();
     if (fx3 == nullptr)
     {
+        set_error(-1, "Failed to create USB handler");
+        delete ret_val;
         return nullptr;
     }
 
@@ -107,6 +145,9 @@ sddc_t *sddc_open(int index, const char* imagefile)
     FILE *fp = fopen(imagefile, "rb");
     if (fp == nullptr)
     {
+        set_error(-2, "Failed to open firmware file: %s", imagefile);
+        delete fx3;
+        delete ret_val;
         return nullptr;
     }
 
@@ -114,21 +155,36 @@ sddc_t *sddc_open(int index, const char* imagefile)
     res_size = ftell(fp);
     res_data = (unsigned char*)malloc(res_size);
     fseek(fp, 0, SEEK_SET);
-    if (fread(res_data, 1, res_size, fp) != res_size)
+    if (fread(res_data, 1, res_size, fp) != res_size) {
+        set_error(-3, "Failed to read firmware file");
+        fclose(fp);
+        free(res_data);
+        delete fx3;
+        delete ret_val;
         return nullptr;
+    }
+    fclose(fp);
 
     bool openOK = fx3->Open();
-    if (!openOK)
+    if (!openOK) {
+        set_error(-4, "Failed to open FX3 USB device");
+        free(res_data);
+        delete fx3;
+        delete ret_val;
         return nullptr;
+    }
 
     ret_val->handler = new RadioHandlerClass();
+    ret_val->fx3 = fx3;
+    ret_val->tuner_if_freq = TUNER_IF_FREQUENCY;  // Default 4.57 MHz
 
     if (ret_val->handler->Init(fx3, Callback, nullptr))
     {
         ret_val->status = SDDC_STATUS_READY;
-        ret_val->samplerateidx = 0;
+        ret_val->samplerateidx = 4;  // Default to 32 MSPS
     }
 
+    free(res_data);
     return ret_val;
 }
 
@@ -422,6 +478,9 @@ int sddc_set_vhf_bias(sddc_t *t, int bias)
 
 double sddc_get_sample_rate(sddc_t *t)
 {
+    if (t->samplerateidx >= 0 && t->samplerateidx < num_sample_rates) {
+        return sample_rates[t->samplerateidx];
+    }
     return 0;
 }
 
@@ -515,3 +574,91 @@ int sddc_read_sync(sddc_t *t, uint8_t *data, int length, int *transferred)
     *transferred = (int)to_read;
     return 0;
 }
+
+/* ============================================================================
+ * NEW API FUNCTIONS
+ * ============================================================================ */
+
+/* Error handling functions */
+int sddc_get_last_error_code(void)
+{
+    return last_error_code;
+}
+
+const char* sddc_get_last_error(void)
+{
+    return last_error[0] ? last_error : nullptr;
+}
+
+/* Tuner IF frequency functions */
+double sddc_get_tuner_if_frequency(sddc_t *t)
+{
+    return t->tuner_if_freq;
+}
+
+int sddc_set_tuner_if_frequency(sddc_t *t, double frequency)
+{
+    if (frequency < 0 || frequency > 10000000) {  // Sanity check: 0-10 MHz
+        set_error(-10, "Invalid IF frequency: %.0f Hz (must be 0-10 MHz)", frequency);
+        return -1;
+    }
+    t->tuner_if_freq = frequency;
+    return 0;
+}
+
+/* GPIO control functions */
+int sddc_gpio_set(sddc_t *t, uint32_t value, uint32_t mask)
+{
+    if (!t || !t->fx3) {
+        set_error(-11, "Invalid device handle for GPIO control");
+        return -1;
+    }
+
+    // Use the FX3 Control function to send GPIO command
+    // The GPIOFX3 command (0xAD) takes the full GPIO state as a 32-bit value
+    // We need to read current state, modify with mask, and write back
+
+    // Unfortunately RadioHandler doesn't expose the current GPIO state directly,
+    // so we'll track it ourselves
+    static uint32_t gpio_state = 0;
+
+    gpio_state = (gpio_state & ~mask) | (value & mask);
+
+    bool ok = t->fx3->Control(GPIOFX3, gpio_state);
+    if (!ok) {
+        set_error(-12, "GPIO control command failed");
+        return -1;
+    }
+
+    return 0;
+}
+
+int sddc_gpio_on(sddc_t *t, uint32_t mask)
+{
+    return sddc_gpio_set(t, mask, mask);
+}
+
+int sddc_gpio_off(sddc_t *t, uint32_t mask)
+{
+    return sddc_gpio_set(t, 0, mask);
+}
+
+uint32_t sddc_gpio_get(sddc_t *t)
+{
+    // Return the current tracked GPIO state
+    // Note: This doesn't read from hardware, just returns last set value
+    static uint32_t gpio_state = 0;
+    return gpio_state;
+}
+
+/* GPIO bit definitions - expose via API */
+uint32_t sddc_gpio_vhf_en(void) { return VHF_EN; }
+uint32_t sddc_gpio_bias_hf(void) { return BIAS_HF; }
+uint32_t sddc_gpio_bias_vhf(void) { return BIAS_VHF; }
+uint32_t sddc_gpio_dither(void) { return DITH; }
+uint32_t sddc_gpio_random(void) { return RANDO; }
+uint32_t sddc_gpio_att_sel0(void) { return ATT_SEL0; }
+uint32_t sddc_gpio_att_sel1(void) { return ATT_SEL1; }
+uint32_t sddc_gpio_led_yellow(void) { return LED_YELLOW; }
+uint32_t sddc_gpio_led_red(void) { return LED_RED; }
+uint32_t sddc_gpio_led_blue(void) { return LED_BLUE; }

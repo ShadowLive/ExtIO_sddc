@@ -164,6 +164,45 @@ int sddc_reset_status(sddc_t *t);
 
 int sddc_read_sync(sddc_t *t, uint8_t *data, int length, int *transferred);
 
+
+/* ============================================================================
+ * Extended API Functions
+ * ============================================================================ */
+
+/* Error handling functions
+ * Thread-local error state for detailed error reporting
+ */
+int sddc_get_last_error_code(void);
+const char* sddc_get_last_error(void);
+
+/* Tuner IF frequency functions
+ * The R820T2/R828D tuner uses an IF frequency (default 4.57 MHz).
+ * The actual RF frequency = tuner_frequency + IF_frequency
+ */
+double sddc_get_tuner_if_frequency(sddc_t *t);
+int sddc_set_tuner_if_frequency(sddc_t *t, double frequency);
+
+/* GPIO control functions
+ * Direct hardware GPIO control for advanced applications.
+ * Use sddc_gpio_*() helper functions to get bit definitions.
+ */
+int sddc_gpio_set(sddc_t *t, uint32_t value, uint32_t mask);
+int sddc_gpio_on(sddc_t *t, uint32_t mask);
+int sddc_gpio_off(sddc_t *t, uint32_t mask);
+uint32_t sddc_gpio_get(sddc_t *t);
+
+/* GPIO bit definition accessors */
+uint32_t sddc_gpio_vhf_en(void);      /* VHF antenna path enable (RX888R2+) */
+uint32_t sddc_gpio_bias_hf(void);     /* HF bias-T enable */
+uint32_t sddc_gpio_bias_vhf(void);    /* VHF bias-T enable */
+uint32_t sddc_gpio_dither(void);      /* ADC dither enable */
+uint32_t sddc_gpio_random(void);      /* ADC randomizer enable */
+uint32_t sddc_gpio_att_sel0(void);    /* Attenuator select bit 0 */
+uint32_t sddc_gpio_att_sel1(void);    /* Attenuator select bit 1 */
+uint32_t sddc_gpio_led_yellow(void);  /* Yellow LED */
+uint32_t sddc_gpio_led_red(void);     /* Red LED */
+uint32_t sddc_gpio_led_blue(void);    /* Blue LED */
+
 #ifdef __cplusplus
 }
 #endif
