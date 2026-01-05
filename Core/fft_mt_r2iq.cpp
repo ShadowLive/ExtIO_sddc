@@ -113,6 +113,11 @@ void fft_mt_r2iq::TurnOn() {
 	this->bufIdx = 0;
 	this->lastThread = threadArgs[0];
 
+	// Reset output ordering sequence counters
+	this->inputSeq.store(0);
+	this->outputWriteTurn.store(0);
+	this->sharedPout = nullptr;
+
 	inputbuffer->Start();
 	outputbuffer->Start();
 
@@ -128,6 +133,10 @@ void fft_mt_r2iq::TurnOff(void) {
 
 	inputbuffer->Stop();
 	outputbuffer->Stop();
+
+	// Wake up any threads waiting on output ordering
+	outputCV.notify_all();
+
 	for (unsigned t = 0; t < processor_count; t++) {
 		r2iq_thread[t].join();
 	}

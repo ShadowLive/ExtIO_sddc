@@ -5,12 +5,13 @@
 #include "config.h"
 #include <algorithm>
 #include <string.h>
+#include <atomic>
+#include <condition_variable>
 
 // use up to this many threads
-// Race condition in plan_f2t_c2c member variable was fixed in fft_mt_r2iq_impl.hpp
-// by using a local variable instead.
-// TODO: Output buffer access is not mutex-protected. For multi-threading (>1),
-// need to implement ordered output writes. For now keep at 1 thread.
+// Race conditions fixed:
+// 1. plan_f2t_c2c - now uses local variable in fft_mt_r2iq_impl.hpp
+// 2. Output buffer ordering - now uses sequence-based serialization
 #define N_MAX_R2IQ_THREADS 1
 #define PRINT_INPUT_RANGE  0
 
@@ -107,6 +108,13 @@ private:
     r2iqThreadArg* threadArgs[N_MAX_R2IQ_THREADS];
     std::mutex mutexR2iqControl;                   // r2iq control lock
     std::thread r2iq_thread[N_MAX_R2IQ_THREADS]; // thread pointers
+
+    // Output ordering synchronization (for multi-threading)
+    std::atomic<uint64_t> inputSeq{0};             // Sequence number for input blocks
+    std::atomic<uint64_t> outputWriteTurn{0};      // Which sequence can write output
+    std::mutex outputMutex;                        // Protects output buffer operations
+    std::condition_variable outputCV;              // Wait for turn to write output
+    fftwf_complex* sharedPout{nullptr};            // Shared output pointer for decimation > 0
 };
 
 // assure, that ADC is not oversteered?

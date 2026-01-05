@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.13)
 
+# FFT Backend Selection
+# Options: FFTW (default), MKL
+set(FFT_BACKEND "FFTW" CACHE STRING "FFT backend to use (FFTW, MKL)")
+set_property(CACHE FFT_BACKEND PROPERTY STRINGS FFTW MKL)
+
+message(STATUS "FFT Backend: ${FFT_BACKEND}")
+
 if (MSVC)
     file(GLOB ARCH_SRC "arch/win32/*.cpp" "arch/win32/CyAPI/*.cpp")
 else()
@@ -7,6 +14,22 @@ else()
 endif (MSVC)
 
 file(GLOB SRC "*.cpp" "radio/*.cpp" "pffft/*.cpp" ${ARCH_SRC})
+
+# Exclude FFT backend files - we'll add the selected one
+list(FILTER SRC EXCLUDE REGEX "fft_backend_.*\\.cpp$")
+
+# Include the FFT benchmark
+list(APPEND SRC fft_benchmark.cpp)
+
+# Add selected FFT backend
+if(FFT_BACKEND STREQUAL "MKL")
+    list(APPEND SRC fft_backend_mkl.cpp)
+    message(STATUS "Using Intel MKL backend")
+else()
+    # Default: FFTW
+    list(APPEND SRC fft_backend_fftw.cpp)
+    message(STATUS "Using FFTW backend")
+endif()
 
 if (MSVC)
     # Assume Windows/x86 target ;)
@@ -50,9 +73,22 @@ add_library(SDDC_CORE STATIC ${SRC})
 set_target_properties(SDDC_CORE PROPERTIES POSITION_INDEPENDENT_CODE True)
 target_compile_definitions(SDDC_CORE PUBLIC _CRT_SECURE_NO_WARNINGS)
 
-target_include_directories(SDDC_CORE PUBLIC "${LIBFFTW_INCLUDE_DIRS}")
-target_link_directories(SDDC_CORE PUBLIC "${LIBFFTW_LIBRARY_DIRS}")
-target_link_libraries(SDDC_CORE PUBLIC ${LIBFFTW_LIBRARIES})
+# FFT backend configuration
+if(FFT_BACKEND STREQUAL "MKL")
+    target_compile_definitions(SDDC_CORE PUBLIC FFT_BACKEND_MKL)
+    # MKL configuration - use FFTW-compatible interface
+    set(MKL_ROOT "/opt/intel/oneapi/mkl/latest" CACHE PATH "Intel MKL root directory")
+    target_include_directories(SDDC_CORE PUBLIC "${MKL_ROOT}/include/fftw")
+    target_link_directories(SDDC_CORE PUBLIC "${MKL_ROOT}/lib")
+    # Link MKL runtime library
+    target_link_libraries(SDDC_CORE PUBLIC mkl_rt)
+else()
+    # Default: FFTW
+    target_compile_definitions(SDDC_CORE PUBLIC FFT_BACKEND_FFTW)
+    target_include_directories(SDDC_CORE PUBLIC "${LIBFFTW_INCLUDE_DIRS}")
+    target_link_directories(SDDC_CORE PUBLIC "${LIBFFTW_LIBRARY_DIRS}")
+    target_link_libraries(SDDC_CORE PUBLIC ${LIBFFTW_LIBRARIES})
+endif()
 
 if (NOT USE_SIMD_OPTIMIZATIONS)
    target_compile_definitions(SDDC_CORE PRIVATE NO_SIMD_OPTIM)
@@ -65,3 +101,13 @@ else(MSVC)
   target_link_directories(SDDC_CORE PUBLIC "${LIBUSB_LIBRARY_DIRS}")
   target_link_libraries(SDDC_CORE PUBLIC ${LIBUSB_LIBRARIES})
 endif(MSVC)
+
+# Standalone FFT benchmark executable
+add_executable(fft_benchmark fft_benchmark.cpp)
+target_compile_definitions(fft_benchmark PRIVATE FFT_BENCHMARK_MAIN)
+target_link_libraries(fft_benchmark PRIVATE SDDC_CORE)
+if(FFT_BACKEND STREQUAL "MKL")
+    target_sources(fft_benchmark PRIVATE fft_backend_mkl.cpp)
+else()
+    target_sources(fft_benchmark PRIVATE fft_backend_fftw.cpp)
+endif()

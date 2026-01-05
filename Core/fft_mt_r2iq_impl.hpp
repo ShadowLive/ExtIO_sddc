@@ -7,17 +7,19 @@
 	const auto filter2 = &filter[halfFft - mfft / 2];
 
 	// Use local variable instead of class member to avoid race condition
-	// when multiple threads are running (N_MAX_R2IQ_THREADS > 1)
 	fftwf_plan local_plan_f2t_c2c = plans_f2t_c2c[decimate];
-	fftwf_complex* pout = nullptr;
-	int decimate_count = 0;
+
+	// Decimation mask for calculating position within output block
+	const int decimateMask = (1 << decimate) - 1;
 
 	while (r2iqOn) {
-		const int16_t *dataADC;  // pointer to input data
-		const int16_t *endloop;    // pointer to end data to be copied to beginning
+		const int16_t *dataADC;
+		const int16_t *endloop;
+		uint64_t mySeq;
 
-		const int _mtunebin = this->mtunebin;  // Update LO tune is possible during run
+		const int _mtunebin = this->mtunebin;
 
+		// === INPUT SECTION (serialized) ===
 		{
 			std::unique_lock<std::mutex> lk(mutexR2iqControl);
 			dataADC = inputbuffer->getReadPtr();
@@ -25,21 +27,17 @@
 			if (!r2iqOn)
 				return 0;
 
+			mySeq = inputSeq.fetch_add(1);
 			this->bufIdx = (this->bufIdx + 1) % QUEUE_SIZE;
-
 			endloop = inputbuffer->peekReadPtr(-1) + transferSamples - halfFft;
 		}
 
 		auto inloop = th->ADCinTime;
 
-		// @todo: move the following int16_t conversion to (32-bit) float
-		// directly inside the following loop (for "k < fftPerBuf")
-		//   just before the forward fft "fftwf_execute_dft_r2c" is called
-		// idea: this should improve cache/memory locality
 #if PRINT_INPUT_RANGE
 		std::pair<int16_t, int16_t> blockMinMax = std::make_pair<int16_t, int16_t>(0, 0);
 #endif
-		if (!this->getRand())        // plain samples no ADC rand set
+		if (!this->getRand())
 		{
 			convert_float<false>(endloop, inloop, halfFft);
 #if PRINT_INPUT_RANGE
@@ -59,12 +57,12 @@
 		th->MinValue = std::min(blockMinMax.first, th->MinValue);
 		th->MaxValue = std::max(blockMinMax.second, th->MaxValue);
 		++th->MinMaxBlockCount;
-		if (th->MinMaxBlockCount * processor_count / 3 >= DEFAULT_TRANSFERS_PER_SEC )
+		if (th->MinMaxBlockCount * processor_count / 3 >= DEFAULT_TRANSFERS_PER_SEC)
 		{
 			float minBits = (th->MinValue < 0) ? (log10f((float)(-th->MinValue)) / log10f(2.0f)) : -1.0f;
 			float maxBits = (th->MaxValue > 0) ? (log10f((float)(th->MaxValue)) / log10f(2.0f)) : -1.0f;
 			printf("r2iq: min = %d (%.1f bits) %.2f%%, max = %d (%.1f bits) %.2f%%\n",
-				(int)th->MinValue, minBits, th->MinValue *-100.0f / 32768.0f,
+				(int)th->MinValue, minBits, th->MinValue * -100.0f / 32768.0f,
 				(int)th->MaxValue, maxBits, th->MaxValue * 100.0f / 32768.0f);
 			th->MinValue = 0;
 			th->MaxValue = 0;
@@ -73,101 +71,84 @@
 #endif
 		dataADC = nullptr;
 		inputbuffer->ReadDone();
-		// decimate in frequency plus tuning
 
-		if (decimate_count == 0)
-			pout = (fftwf_complex*)outputbuffer->getWritePtr();
-
-		decimate_count = (decimate_count + 1) & ((1 << decimate) - 1);
-
-		// Calculate the parameters for the first half
-		const auto count = std::min(mfft/2, halfFft - _mtunebin);
+		// Calculate parameters for frequency shift
+		const auto count = std::min(mfft / 2, halfFft - _mtunebin);
 		const auto source = &th->ADCinFreq[_mtunebin];
-
-		// Calculate the parameters for the second half
 		const auto start = std::max(0, mfft / 2 - _mtunebin);
 		const auto source2 = &th->ADCinFreq[_mtunebin - mfft / 2];
 		const auto dest = &th->inFreqTmp[mfft / 2];
+
+		// === FFT + OUTPUT with per-k synchronization ===
+		// Each k iteration: do FFT (parallel), then copy to output (serialized)
 		for (int k = 0; k < fftPerBuf; k++)
 		{
-			// core of fast convolution including filter and decimation
-			//   main part is 'overlap-scrap' (IMHO better name for 'overlap-save'), see
-			//   https://en.wikipedia.org/wiki/Overlap%E2%80%93save_method
+			// FFT processing - can run in parallel across threads
+			// (each thread uses its own th->ADCinTime, th->ADCinFreq, th->inFreqTmp)
+			fftwf_execute_dft_r2c(plan_t2f_r2c, th->ADCinTime + (3 * halfFft / 2) * k, th->ADCinFreq);
+
+			shift_freq(th->inFreqTmp, source, filter, 0, count);
+			if (mfft / 2 != count)
+				memset(th->inFreqTmp[count], 0, sizeof(float) * 2 * (mfft / 2 - count));
+
+			shift_freq(dest, source2, filter2, start, mfft / 2);
+			if (start != 0)
+				memset(th->inFreqTmp[mfft / 2], 0, sizeof(float) * 2 * start);
+
+			fftwf_execute_dft(local_plan_f2t_c2c, th->inFreqTmp, th->inFreqTmp);
+
+			// === OUTPUT COPY (serialized in sequence order) ===
 			{
-				// FFT first stage: time to frequency, real to complex
-				// 'full' transformation size: 2 * halfFft
-				fftwf_execute_dft_r2c(plan_t2f_r2c, th->ADCinTime + (3 * halfFft / 2) * k, th->ADCinFreq);
-				// result now in th->ADCinFreq[]
+				std::unique_lock<std::mutex> lk(outputMutex);
 
-				// circular shift (mixing in full bins) and low/bandpass filtering (complex multiplication)
-				{
-					// circular shift tune fs/2 first half array into th->inFreqTmp[]
-					shift_freq(th->inFreqTmp, source, filter, 0, count);
-					if (mfft / 2 != count)
-						memset(th->inFreqTmp[count], 0, sizeof(float) * 2 * (mfft / 2 - count));
+				// Wait for our turn (only on first k of this block)
+				if (k == 0) {
+					outputCV.wait(lk, [&] { return outputWriteTurn.load() == mySeq || !r2iqOn; });
+					if (!r2iqOn)
+						return 0;
 
-					// circular shift tune fs/2 second half array
-					shift_freq(dest, source2, filter2, start, mfft/2);
-					if (start != 0)
-						memset(th->inFreqTmp[mfft / 2], 0, sizeof(float) * 2 * start);
+					// Get output pointer
+					int myDecimateCount = static_cast<int>(mySeq & decimateMask);
+					if (myDecimateCount == 0) {
+						sharedPout = (fftwf_complex*)outputbuffer->getWritePtr();
+					}
 				}
-				// result now in th->inFreqTmp[]
 
-				// 'shorter' inverse FFT transform (decimation); frequency (back) to COMPLEX time domain
-				// transform size: mfft = mfftdim[k] = halfFft / 2^k with k = mdecimation
-				fftwf_execute_dft(local_plan_f2t_c2c, th->inFreqTmp, th->inFreqTmp);     //  c2c decimation
-				// result now in th->inFreqTmp[]
-			}
+				// Calculate output position
+				int myDecimateCount = static_cast<int>(mySeq & decimateMask);
+				fftwf_complex* pout = sharedPout;
+				for (int i = 0; i < myDecimateCount; i++) {
+					pout += mfft / 2 + (3 * mfft / 4) * (fftPerBuf - 1);
+				}
 
-			// postprocessing
-			// @todo: is it possible to ..
-			//  1)
-			//    let inverse FFT produce/save it's result directly
-			//    in "this->obuffers[modx] + offset" (pout)
-			//    ( obuffers[] would need to have additional space ..;
-			//      need to move 'scrap' of 'ovelap-scrap'? )
-			//    at least FFTW would allow so,
-			//      see http://www.fftw.org/fftw3_doc/New_002darray-Execute-Functions.html
-			//    attention: multithreading!
-			//  2)
-			//    could mirroring (lower sideband) get calculated together
-			//    with fine mixer - modifying the mixer frequency? (fs - fc)/fs
-			//    (this would reduce one memory pass)
-			if (lsb) // lower sideband
-			{
-				// mirror just by negating the imaginary Q of complex I/Q
-				if (k == 0)
+				// Copy to output
+				if (lsb)
 				{
-					copy<true>(pout, &th->inFreqTmp[mfft / 4], mfft/2);
+					if (k == 0)
+						copy<true>(pout, &th->inFreqTmp[mfft / 4], mfft / 2);
+					else
+						copy<true>(pout + mfft / 2 + (3 * mfft / 4) * (k - 1), &th->inFreqTmp[0], (3 * mfft / 4));
 				}
 				else
 				{
-					copy<true>(pout + mfft / 2 + (3 * mfft / 4) * (k - 1), &th->inFreqTmp[0], (3 * mfft / 4));
+					if (k == 0)
+						copy<false>(pout, &th->inFreqTmp[mfft / 4], mfft / 2);
+					else
+						copy<false>(pout + mfft / 2 + (3 * mfft / 4) * (k - 1), &th->inFreqTmp[0], (3 * mfft / 4));
+				}
+
+				// On last k, complete the block
+				if (k == fftPerBuf - 1) {
+					if (myDecimateCount == decimateMask) {
+						outputbuffer->WriteDone();
+						sharedPout = nullptr;
+					}
+					outputWriteTurn.fetch_add(1);
+					outputCV.notify_all();
 				}
 			}
-			else // upper sideband
-			{
-				if (k == 0)
-				{
-					copy<false>(pout, &th->inFreqTmp[mfft / 4], mfft/2);
-				}
-				else
-				{
-					copy<false>(pout + mfft / 2 + (3 * mfft / 4) * (k - 1), &th->inFreqTmp[0], (3 * mfft / 4));
-				}
-			}
-			// result now in this->obuffers[]
 		}
 
-		if (decimate_count == 0) {
-			outputbuffer->WriteDone();
-			pout = nullptr;
-		}
-		else
-		{
-			pout += mfft / 2 + (3 * mfft / 4) * (fftPerBuf - 1);
-		}
 	} // while(run)
-//    DbgPrintf("r2iqThreadf idx %d pthread_exit %u\n",(int)th->t, pthread_self());
 	return 0;
 }
