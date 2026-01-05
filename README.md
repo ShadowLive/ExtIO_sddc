@@ -105,25 +105,6 @@ make
 - Add error handling with sddc_get_last_error()
 - Improved sample rate documentation
 
-## References
-- EXTIO Specification from http://www.sdradio.eu/weaksignals/bin/Winrad_Extio.pdf
-- Discussion and Support https://groups.io/g/NextGenSDRs
-- Recommended Application http://www.weaksignals.com/
-- http://www.hdsdr.de
-- http://booyasdr.sourceforge.net/
-- http://www.cypress.com/
+## Upstream Project
 
-
-## Many thanks to
-- Alberto di Bene, I2PHD
-- Mario Taeubel
-- LightCoder (aka LC)
-- Howard Su
-- Hayati Ayguen
-- Franco Venturi
-- All the Others !
-
-#### 2016,2017,2018,2019,2020,2021  IK1XPV Oscar Steila - ik1xpv(at)gmail.com
-https://sdr-prototypes.blogspot.com/
-
-http://www.steila.com/blog
+For references, acknowledgments, and full project history, see the [upstream repository](https://github.com/ik1xpv/ExtIO_sddc).
