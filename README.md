@@ -1,21 +1,20 @@
-## ExtIO_sddc.dll (software digital down converter) - Oscar Steila, ik1xpv
+## ExtIO_sddc.dll (software digital down converter)
 
 > **Warning: Custom Fork**
 >
 > This is a custom fork specifically modified for the **RX-888 Mk II**. Changes include VHF tuner fixes, performance optimizations, and API enhancements that have **not been tested against other SDR hardware** (HF103, BBRF103, RX888 Mk I, RX999, etc.). If you are using a different SDR, please use the [upstream repository](https://github.com/ik1xpv/ExtIO_sddc) instead.
 
-![CMake](https://github.com/ik1xpv/ExtIO_sddc/workflows/CMake/badge.svg)
+Based on the original work by Oscar Steila (IK1XPV).
 
 ## RX-888 Documents and Support
 
-If you are looking for RX-888 documents or support, please naviate: https://www.rx-888.com/rx/
+If you are looking for RX-888 documents or support, please navigate to: https://www.rx-888.com/rx/
 
 ## Installation Instructions
 
-You can download the latest EXTIO driver from the releases: https://github.com/ik1xpv/ExtIO_sddc/releases.
-The direct link to the current version v1.2.0 Version released at 18/3/2021 is: https://github.com/ik1xpv/ExtIO_sddc/releases/download/v1.2.0/SDDC_EXTIO.ZIP.
+This fork must be built from source. See the build instructions below.
 
-*If you want to try the beta EXTIO driver which is for testing, you can find the binary for each change here: https://github.com/ik1xpv/ExtIO_sddc/actions. Select one specific code change you like to try, click on the link of the change. And you will find the binary on the bottom of the change.*
+For pre-built binaries from the upstream project, visit: https://github.com/ik1xpv/ExtIO_sddc/releases (note: these will not include the fixes in this fork).
 
 
 ## Build Instructions for ExtIO
@@ -84,7 +83,31 @@ make
     \libsddc\        > libsddc lib
     \SDDC_FX3\          > Firmware sources
 
-## Change Logs
+## Fork Change Log
+
+### RX-888 Mk II Fork (January 2025)
+
+**VHF Tuner Fixes:**
+- Fix VHF mode spectrum mirroring caused by incorrect sideband inversion
+- R828D tuner uses low-side injection, spectrum should not be inverted at IF
+
+**Performance Optimizations:**
+- Replace byte-by-byte ring buffer copy with memcpy (10-100x sync read improvement)
+- Increase FFT processing threads from 1 to 4 for multi-core utilization
+- SSE/AVX vectorization for int16→float conversion, complex multiply, and complex copy
+- Lock-free ring buffer using std::atomic indices
+- Reduced mutex contention in fine-tune mixer path
+
+**libsddc API Enhancements:**
+- Add VGA (AD8370) gain control functions
+- Add GPIO control functions for direct hardware access
+- Add tuner IF frequency configuration
+- Add error handling with sddc_get_last_error()
+- Improved sample rate documentation
+
+---
+
+## Upstream Change Logs
 
 ### tag v1.4 version date 7/5/2024
 - Add SoapySDR module for Linux & Windoes
