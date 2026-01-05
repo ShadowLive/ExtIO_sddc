@@ -8,13 +8,21 @@
 // R820T2/R828D tuner IF frequency (4.57 MHz)
 #define TUNER_IF_FREQUENCY 4570000.0
 
-// Sample rates indexed by samplerateidx (matches RadioHandler::Start decimation)
+// Sample rates indexed by samplerateidx
+// RadioHandler::Start sets: decimate = 4 - srate_idx
+// R2IQ mdecimation table for 64 MSPS ADC (from r2iq.h):
+//   mdecimation=0 → 32 MSPS (ratio=2)
+//   mdecimation=1 → 16 MSPS (ratio=4)
+//   mdecimation=2 → 8 MSPS (ratio=8)
+//   mdecimation=3 → 4 MSPS (ratio=16)
+//   mdecimation=4 → 2 MSPS (ratio=32)
+// So srate_idx maps to output rate:
 static const double sample_rates[] = {
-    2000000.0,   // idx 0: decimate=4, 32 >> 4 = 2 MSPS
-    4000000.0,   // idx 1: decimate=3, 32 >> 3 = 4 MSPS
-    8000000.0,   // idx 2: decimate=2, 32 >> 2 = 8 MSPS
-    16000000.0,  // idx 3: decimate=1, 32 >> 1 = 16 MSPS
-    32000000.0,  // idx 4: decimate=0, 32 >> 0 = 32 MSPS
+    2000000.0,   // idx 0: decimate=4 → mdecimation=4 → 2 MSPS
+    4000000.0,   // idx 1: decimate=3 → mdecimation=3 → 4 MSPS
+    8000000.0,   // idx 2: decimate=2 → mdecimation=2 → 8 MSPS
+    16000000.0,  // idx 3: decimate=1 → mdecimation=1 → 16 MSPS
+    32000000.0,  // idx 4: decimate=0 → mdecimation=0 → 32 MSPS
 };
 static const int num_sample_rates = sizeof(sample_rates) / sizeof(sample_rates[0]);
 
@@ -65,6 +73,7 @@ static uint8_t sync_buffer[1024 * 1024];  // 1MB buffer
 static size_t sync_write_pos = 0;
 static size_t sync_read_pos = 0;
 static size_t sync_available = 0;
+
 
 static void Callback(void* context, const float* data, uint32_t len)
 {
@@ -510,27 +519,32 @@ double sddc_get_sample_rate(sddc_t *t)
 
 int sddc_set_sample_rate(sddc_t *t, double sample_rate)
 {
-    // Sample rate indices must match RadioHandler::Start() which uses:
-    // decimate = 4 - srate_idx, giving output = 32 >> decimate MSPS
-    // This matches SoapySDDC's mapping
-    switch((int64_t)sample_rate)
+    // R2IQ mdecimation maps to output rate (for 64 MSPS ADC):
+    //   srate_idx=0 → decimate=4 → mdecimation=4 → 2 MSPS
+    //   srate_idx=1 → decimate=3 → mdecimation=3 → 4 MSPS
+    //   srate_idx=2 → decimate=2 → mdecimation=2 → 8 MSPS
+    //   srate_idx=3 → decimate=1 → mdecimation=1 → 16 MSPS
+    //   srate_idx=4 → decimate=0 → mdecimation=0 → 32 MSPS
+    int64_t rate = (int64_t)sample_rate;
+    switch(rate)
     {
         case 32000000:
-            t->samplerateidx = 4;  // decimate=0, output=32 MSPS
+            t->samplerateidx = 4;  // mdecimation=0, output=32 MSPS
             break;
         case 16000000:
-            t->samplerateidx = 3;  // decimate=1, output=16 MSPS
+            t->samplerateidx = 3;  // mdecimation=1, output=16 MSPS
             break;
         case 8000000:
-            t->samplerateidx = 2;  // decimate=2, output=8 MSPS
+            t->samplerateidx = 2;  // mdecimation=2, output=8 MSPS
             break;
         case 4000000:
-            t->samplerateidx = 1;  // decimate=3, output=4 MSPS
+            t->samplerateidx = 1;  // mdecimation=3, output=4 MSPS
             break;
         case 2000000:
-            t->samplerateidx = 0;  // decimate=4, output=2 MSPS
+            t->samplerateidx = 0;  // mdecimation=4, output=2 MSPS
             break;
         default:
+            set_error(-1, "Unsupported sample rate: %.0f Hz", sample_rate);
             return -1;
     }
     return 0;

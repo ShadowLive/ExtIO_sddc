@@ -150,13 +150,14 @@ bool RadioHandlerClass::Start(int srate_idx)
 	DbgPrintf("RadioHandlerClass::Start\n");
 
 	int	decimate = 4 - srate_idx;   // 5 IF bands
-	if (adcnominalfreq > N2_BANDSWITCH) 
+	if (adcnominalfreq > N2_BANDSWITCH)
 		decimate = 5 - srate_idx;   // 6 IF bands
 	if (decimate < 0)
 	{
 		decimate = 0;
 		DbgPrintf("WARNING decimate mismatch at srate_idx = %d\n", srate_idx);
 	}
+
 	run = true;
 	count = 0;
 
