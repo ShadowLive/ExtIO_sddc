@@ -7,6 +7,10 @@
 #include <string.h>
 
 // use up to this many threads
+// Race condition in plan_f2t_c2c member variable was fixed in fft_mt_r2iq_impl.hpp
+// by using a local variable instead.
+// TODO: Output buffer access is not mutex-protected. For multi-threading (>1),
+// need to implement ordered output writes. For now keep at 1 thread.
 #define N_MAX_R2IQ_THREADS 1
 #define PRINT_INPUT_RANGE  0
 

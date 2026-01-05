@@ -669,3 +669,171 @@ TEST_CASE(BenchmarkFixture, RateSwitchingBenchmark)
     delete radio;
     delete usb;
 }
+
+/**
+ * High-rate throughput benchmark (128 Msps)
+ * Tests the system at 128 MHz ADC rate with 6 decimation levels
+ */
+TEST_CASE(BenchmarkFixture, HighRateThroughputBenchmark)
+{
+    const uint32_t HIGH_ADC_FREQ = 128000000;  // 128 MHz
+
+    printf("\n");
+    printf("================================================================================\n");
+    printf("               HIGH-RATE DSP THROUGHPUT BENCHMARK (128 Msps)\n");
+    printf("================================================================================\n");
+    printf("Configuration:\n");
+    printf("  Transfer size:    %u bytes (%u samples)\n", transferSize, transferSamples);
+    printf("  ADC sample rate:  %u Hz (%.1f Msps)\n", HIGH_ADC_FREQ, HIGH_ADC_FREQ / 1e6);
+    printf("  Test duration:    %d seconds per decimation level\n", BENCHMARK_DURATION_SECONDS);
+    printf("  Decimation levels: 6 (above 80 MHz threshold)\n");
+    printf("================================================================================\n\n");
+
+    // Save original ADC frequency and set to 128 MHz
+    uint32_t originalAdcFreq = adcnominalfreq;
+    adcnominalfreq = HIGH_ADC_FREQ;
+
+    auto usb = new fx3handler_benchmark();
+    auto radio = new RadioHandlerClass();
+
+    radio->Init(usb, BenchmarkCallback);
+    radio->UpdateSampleRate(HIGH_ADC_FREQ);
+
+    std::vector<BenchmarkStats> results;
+
+    // Test each decimation level (0-5 at 128 MHz - 6 levels)
+    // At 128 MHz: dec=0 -> 64 Msps, dec=1 -> 32 Msps, dec=2 -> 16 Msps,
+    //             dec=3 -> 8 Msps, dec=4 -> 4 Msps, dec=5 -> 2 Msps
+    for (int srate_idx = 0; srate_idx < 6; srate_idx++)
+    {
+        ResetStats();
+
+        // Calculate expected output sample rate for this decimation
+        // decimate = 5 - srate_idx (since adcnominalfreq > N2_BANDSWITCH)
+        int decimate = 5 - srate_idx;
+        uint32_t expectedOutputRate = HIGH_ADC_FREQ / 2;  // DDC halves the rate
+        for (int i = 0; i < decimate; i++) {
+            expectedOutputRate /= 2;
+        }
+
+        printf("Testing srate_idx %d (decimate=%d, expected %.1f Msps output)...\n",
+               srate_idx, decimate, expectedOutputRate / 1e6);
+
+        // Start streaming
+        auto startTime = high_resolution_clock::now();
+        radio->Start(srate_idx);
+
+        // Wait for input to start
+        while (!usb->isInputStarted()) {
+            std::this_thread::sleep_for(1ms);
+        }
+        g_inputStartTime = usb->getFirstInputTime();
+
+        // Run for specified duration
+        std::this_thread::sleep_for(seconds(BENCHMARK_DURATION_SECONDS));
+
+        // Stop and collect stats
+        radio->Stop();
+        auto endTime = high_resolution_clock::now();
+
+        // Collect results
+        BenchmarkStats stats;
+        stats.callbackCount = g_callbackCount.load();
+        stats.totalSamples = g_totalSamples.load();
+        stats.elapsedSeconds = duration<double>(endTime - startTime).count();
+
+        // Calculate Msps
+        stats.msps = (stats.totalSamples / 1e6) / stats.elapsedSeconds;
+
+        // Calculate real-time efficiency
+        double expectedSamples = expectedOutputRate * stats.elapsedSeconds;
+        stats.realtimePercent = (stats.totalSamples / expectedSamples) * 100.0;
+
+        // Get buffer statistics from the ringbuffer
+        auto inputBuffer = usb->getInputBuffer();
+        if (inputBuffer) {
+            stats.bufferFullEvents = inputBuffer->getFullCount();
+            stats.bufferEmptyEvents = inputBuffer->getEmptyCount();
+        }
+
+        results.push_back(stats);
+
+        // Brief pause between tests
+        std::this_thread::sleep_for(100ms);
+    }
+
+    // Print benchmark results
+    printf("\n");
+    printf("================================================================================\n");
+    printf("                     128 Msps BENCHMARK RESULTS\n");
+    printf("================================================================================\n");
+    printf("\nThroughput by Sample Rate Index:\n");
+    printf("--------------------------------------------------------------------------------\n");
+    printf("  Idx | Dec |  Expected Rate  |  Actual Rate  |  Efficiency  |  Callbacks\n");
+    printf("--------------------------------------------------------------------------------\n");
+
+    for (int i = 0; i < 6; i++) {
+        int decimate = 5 - i;
+        uint32_t expectedRate = HIGH_ADC_FREQ / 2;
+        for (int j = 0; j < decimate; j++) expectedRate /= 2;
+
+        printf("   %d  |  %d  |   %6.2f Msps   |  %6.2f Msps  |   %6.1f%%    |  %" PRIu64 "\n",
+               i, decimate,
+               expectedRate / 1e6,
+               results[i].msps,
+               results[i].realtimePercent,
+               results[i].callbackCount);
+    }
+    printf("--------------------------------------------------------------------------------\n");
+
+    printf("\nBuffer Statistics:\n");
+    printf("--------------------------------------------------------------------------------\n");
+    int totalFull = 0, totalEmpty = 0;
+    for (const auto& s : results) {
+        totalFull += s.bufferFullEvents;
+        totalEmpty += s.bufferEmptyEvents;
+    }
+    printf("  Buffer full events (input overrun):   %d\n", totalFull);
+    printf("  Buffer empty events (output underrun): %d\n", totalEmpty);
+    printf("--------------------------------------------------------------------------------\n");
+
+    // Summary
+    printf("\n================================================================================\n");
+    printf("                            128 Msps SUMMARY\n");
+    printf("================================================================================\n");
+
+    double avgEfficiency = 0;
+    for (const auto& s : results) {
+        avgEfficiency += s.realtimePercent;
+    }
+    avgEfficiency /= results.size();
+
+    printf("  Average real-time efficiency: %.1f%%\n", avgEfficiency);
+    printf("  Total buffer overruns:        %d\n", totalFull);
+    printf("  Total buffer underruns:       %d\n", totalEmpty);
+
+    // Check critical bottleneck - srate_idx 0 (full 64 Msps bandwidth)
+    printf("\n  Critical bottleneck check:\n");
+    printf("    srate_idx 0 (64 Msps): %.1f%% efficiency %s\n",
+           results[0].realtimePercent,
+           results[0].realtimePercent >= 100.0 ? "(PASS)" : "(BOTTLENECK)");
+
+    if (avgEfficiency >= 100.0) {
+        printf("\n  STATUS: PASS - System can process 128 Msps faster than real-time\n");
+    } else {
+        printf("\n  STATUS: WARNING - System may not keep up with 128 Msps data\n");
+    }
+    printf("================================================================================\n\n");
+
+    // Verify basic functionality
+    for (int i = 0; i < 6; i++) {
+        REQUIRE_TRUE(results[i].callbackCount > 0);
+        REQUIRE_TRUE(results[i].totalSamples > 0);
+    }
+
+    // Restore original ADC frequency
+    adcnominalfreq = originalAdcFreq;
+
+    delete radio;
+    delete usb;
+}

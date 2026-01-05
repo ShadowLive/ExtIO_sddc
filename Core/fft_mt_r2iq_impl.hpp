@@ -6,7 +6,9 @@
 	const bool lsb = this->getSideband();
 	const auto filter2 = &filter[halfFft - mfft / 2];
 
-	plan_f2t_c2c = &plans_f2t_c2c[decimate];
+	// Use local variable instead of class member to avoid race condition
+	// when multiple threads are running (N_MAX_R2IQ_THREADS > 1)
+	fftwf_plan local_plan_f2t_c2c = plans_f2t_c2c[decimate];
 	fftwf_complex* pout = nullptr;
 	int decimate_count = 0;
 
@@ -113,7 +115,7 @@
 
 				// 'shorter' inverse FFT transform (decimation); frequency (back) to COMPLEX time domain
 				// transform size: mfft = mfftdim[k] = halfFft / 2^k with k = mdecimation
-				fftwf_execute_dft(*plan_f2t_c2c, th->inFreqTmp, th->inFreqTmp);     //  c2c decimation
+				fftwf_execute_dft(local_plan_f2t_c2c, th->inFreqTmp, th->inFreqTmp);     //  c2c decimation
 				// result now in th->inFreqTmp[]
 			}
 
