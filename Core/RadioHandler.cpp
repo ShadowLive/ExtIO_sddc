@@ -32,18 +32,8 @@ void RadioHandlerClass::OnDataPacket()
 
 		if (fc != 0.0f)
 		{
-			// Copy state under lock, then perform SSE operation without lock held
-			shift_limited_unroll_C_sse_data_t localState;
-			{
-				std::lock_guard<std::mutex> lk(fc_mutex);
-				localState = *stateFineTune;
-			}
-			shift_limited_unroll_C_sse_inp_c((complexf*)buf, len, &localState);
-			// Update shared state with new phase (under lock)
-			{
-				std::lock_guard<std::mutex> lk(fc_mutex);
-				*stateFineTune = localState;
-			}
+			std::unique_lock<std::mutex> lk(fc_mutex);
+			shift_limited_unroll_C_sse_inp_c((complexf*)buf, len, stateFineTune);
 		}
 
 #ifdef _DEBUG		//PScope buffer screenshot
