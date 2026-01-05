@@ -85,7 +85,7 @@ make
 
 ## Fork Change Log
 
-### RX-888 Mk II Fork (January 2025)
+### RX-888 Mk II Fork (January 2026)
 
 **VHF Tuner Fixes:**
 - Fix VHF mode spectrum mirroring caused by incorrect sideband inversion
