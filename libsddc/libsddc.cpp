@@ -90,21 +90,35 @@ static void Callback(void* context, const float* data, uint32_t len)
 
     // Store in sync buffer for sddc_read_sync
     // len = number of complex samples, each complex = 2 floats (I + Q)
+    const size_t bytes = len * 2 * sizeof(float);
+    const uint8_t* src = (const uint8_t*)data;
+    constexpr size_t buffer_size = sizeof(sync_buffer);
+
     {
         std::lock_guard<std::mutex> lock(sync_mutex);
-        size_t bytes = len * 2 * sizeof(float);  // Complex samples: 2 floats each
-        size_t buffer_size = sizeof(sync_buffer);
 
-        // Write to ring buffer
-        for (size_t i = 0; i < bytes; i++) {
-            sync_buffer[sync_write_pos] = ((uint8_t*)data)[i];
-            sync_write_pos = (sync_write_pos + 1) % buffer_size;
-            if (sync_available < buffer_size) {
-                sync_available++;
-            } else {
-                // Buffer overflow - advance read position
-                sync_read_pos = (sync_read_pos + 1) % buffer_size;
-            }
+        // Calculate contiguous space from write position to end of buffer
+        size_t to_end = buffer_size - sync_write_pos;
+
+        if (bytes <= to_end) {
+            // Data fits in one contiguous block
+            memcpy(&sync_buffer[sync_write_pos], src, bytes);
+            sync_write_pos = (sync_write_pos + bytes) % buffer_size;
+        } else {
+            // Data wraps around - copy in two parts
+            memcpy(&sync_buffer[sync_write_pos], src, to_end);
+            memcpy(sync_buffer, src + to_end, bytes - to_end);
+            sync_write_pos = bytes - to_end;
+        }
+
+        // Update available count, handling overflow
+        if (sync_available + bytes <= buffer_size) {
+            sync_available += bytes;
+        } else {
+            // Buffer overflow - discard old data
+            size_t overflow = (sync_available + bytes) - buffer_size;
+            sync_read_pos = (sync_read_pos + overflow) % buffer_size;
+            sync_available = buffer_size;
         }
     }
     sync_cv.notify_one();
@@ -599,13 +613,22 @@ int sddc_read_sync(sddc_t *t, uint8_t *data, int length, int *transferred)
         return 0;  // Timeout, no data
     }
 
-    // Read available data
+    // Read available data using memcpy
     size_t to_read = std::min((size_t)length, sync_available);
-    size_t buffer_size = sizeof(sync_buffer);
+    constexpr size_t buffer_size = sizeof(sync_buffer);
 
-    for (size_t i = 0; i < to_read; i++) {
-        data[i] = sync_buffer[sync_read_pos];
-        sync_read_pos = (sync_read_pos + 1) % buffer_size;
+    // Calculate contiguous data from read position to end of buffer
+    size_t to_end = buffer_size - sync_read_pos;
+
+    if (to_read <= to_end) {
+        // Data is in one contiguous block
+        memcpy(data, &sync_buffer[sync_read_pos], to_read);
+        sync_read_pos = (sync_read_pos + to_read) % buffer_size;
+    } else {
+        // Data wraps around - copy in two parts
+        memcpy(data, &sync_buffer[sync_read_pos], to_end);
+        memcpy(data + to_end, sync_buffer, to_read - to_end);
+        sync_read_pos = to_read - to_end;
     }
     sync_available -= to_read;
 
