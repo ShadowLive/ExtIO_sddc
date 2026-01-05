@@ -3,6 +3,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
 
 const int default_count = 64;
 const int spin_count = 100;
@@ -29,46 +30,49 @@ public:
 
     void ReadDone()
     {
-        std::unique_lock<std::mutex> lk(mutex);
-        if ((write_index + 1) % max_count == read_index)
-        {
-            read_index = (read_index + 1) % max_count;
-            nonfullCV.notify_all();
-        }
-        else
-        {
-            read_index = (read_index + 1) % max_count;
+        int cur_write = write_index.load(std::memory_order_acquire);
+        int cur_read = read_index.load(std::memory_order_relaxed);
+        bool was_full = ((cur_write + 1) % max_count == cur_read);
+
+        read_index.store((cur_read + 1) % max_count, std::memory_order_release);
+
+        if (was_full) {
+            std::lock_guard<std::mutex> lk(mutex);
+            nonfullCV.notify_one();
         }
     }
 
     void WriteDone()
     {
-        std::unique_lock<std::mutex> lk(mutex);
-        if (read_index == write_index)
-        {
-            write_index = (write_index + 1) % max_count;
-            nonemptyCV.notify_all();
-        }
-        else
-        {
-            write_index = (write_index + 1) % max_count;
-        }
+        int cur_read = read_index.load(std::memory_order_acquire);
+        int cur_write = write_index.load(std::memory_order_relaxed);
+        bool was_empty = (cur_read == cur_write);
+
+        write_index.store((cur_write + 1) % max_count, std::memory_order_release);
         writeCount++;
+
+        if (was_empty) {
+            std::lock_guard<std::mutex> lk(mutex);
+            nonemptyCV.notify_one();
+        }
     }
 
     void Start()
     {
-        std::unique_lock<std::mutex> lk(mutex);
-        write_index = read_index = 0;
-        stopped = false;
+        std::lock_guard<std::mutex> lk(mutex);
+        write_index.store(0, std::memory_order_release);
+        read_index.store(0, std::memory_order_release);
+        stopped.store(false, std::memory_order_release);
     }
 
     void Stop()
     {
-        std::unique_lock<std::mutex> lk(mutex);
-        read_index = 0;
-        stopped = true;
-        write_index = max_count / 2;
+        {
+            std::lock_guard<std::mutex> lk(mutex);
+            read_index.store(0, std::memory_order_release);
+            stopped.store(true, std::memory_order_release);
+            write_index.store(max_count / 2, std::memory_order_release);
+        }
         nonfullCV.notify_all();
         nonemptyCV.notify_all();
     }
@@ -77,50 +81,52 @@ protected:
 
     void WaitUntilNotEmpty()
     {
-        if (stopped) return;
-        
-        // if not empty
-        for (int i = 0; i < spin_count; i++)
-        {
-            if (read_index != write_index)
+        if (stopped.load(std::memory_order_acquire)) return;
+
+        // Spin-wait phase with relaxed loads for efficiency
+        for (int i = 0; i < spin_count; i++) {
+            if (read_index.load(std::memory_order_acquire) !=
+                write_index.load(std::memory_order_acquire))
                 return;
         }
 
-        if (read_index == write_index)
-        {
-            std::unique_lock<std::mutex> lk(mutex);
-
-            emptyCount++;
-            nonemptyCV.wait(lk, [this] {
-                return read_index != write_index;
-            });
-        }
+        // Fall back to condition variable
+        std::unique_lock<std::mutex> lk(mutex);
+        emptyCount++;
+        nonemptyCV.wait(lk, [this] {
+            return stopped.load(std::memory_order_acquire) ||
+                   read_index.load(std::memory_order_acquire) !=
+                   write_index.load(std::memory_order_acquire);
+        });
     }
 
     void WaitUntilNotFull()
     {
-        if (stopped) return;
+        if (stopped.load(std::memory_order_acquire)) return;
 
-        for (int i = 0; i < spin_count; i++)
-        {
-            if ((write_index + 1) % max_count != read_index)
+        // Spin-wait phase
+        for (int i = 0; i < spin_count; i++) {
+            int r = read_index.load(std::memory_order_acquire);
+            int w = write_index.load(std::memory_order_acquire);
+            if ((w + 1) % max_count != r)
                 return;
         }
 
-        if ((write_index + 1) % max_count == read_index)
-        {
-            std::unique_lock<std::mutex> lk(mutex);
-            fullCount++;
-            nonfullCV.wait(lk, [this] {
-                return (write_index + 1) % max_count != read_index;
-            });
-        }
+        // Fall back to condition variable
+        std::unique_lock<std::mutex> lk(mutex);
+        fullCount++;
+        nonfullCV.wait(lk, [this] {
+            if (stopped.load(std::memory_order_acquire)) return true;
+            int r = read_index.load(std::memory_order_acquire);
+            int w = write_index.load(std::memory_order_acquire);
+            return (w + 1) % max_count != r;
+        });
     }
 
     int max_count;
 
-    volatile int read_index;
-    volatile int write_index;
+    std::atomic<int> read_index;
+    std::atomic<int> write_index;
 
 private:
     int emptyCount;
@@ -128,7 +134,7 @@ private:
     int writeCount;
 
     std::mutex mutex;
-    bool stopped;
+    std::atomic<bool> stopped;
     std::condition_variable nonemptyCV;
     std::condition_variable nonfullCV;
 };
@@ -174,26 +180,29 @@ public:
 
     T* peekWritePtr(int offset)
     {
-        return buffers[(write_index + max_count + offset) % max_count];
+        int w = write_index.load(std::memory_order_acquire);
+        return buffers[(w + max_count + offset) % max_count];
     }
 
     T* peekReadPtr(int offset)
     {
-        return buffers[(read_index + max_count + offset) % max_count];
+        int r = read_index.load(std::memory_order_acquire);
+        return buffers[(r + max_count + offset) % max_count];
     }
 
     T* getWritePtr()
     {
         // if there is still space
         WaitUntilNotFull();
-        return buffers[(write_index) % max_count];
+        int w = write_index.load(std::memory_order_acquire);
+        return buffers[w % max_count];
     }
 
     const T* getReadPtr()
     {
         WaitUntilNotEmpty();
-
-        return buffers[read_index];
+        int r = read_index.load(std::memory_order_acquire);
+        return buffers[r];
     }
 
     int getBlockSize() const { return block_size; }
