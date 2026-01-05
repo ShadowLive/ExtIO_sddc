@@ -1,5 +1,9 @@
 ## ExtIO_sddc.dll (software digital down converter) - Oscar Steila, ik1xpv
 
+> **Warning: Custom Fork**
+>
+> This is a custom fork specifically modified for the **RX-888 Mk II**. Changes include VHF tuner fixes, performance optimizations, and API enhancements that have **not been tested against other SDR hardware** (HF103, BBRF103, RX888 Mk I, RX999, etc.). If you are using a different SDR, please use the [upstream repository](https://github.com/ik1xpv/ExtIO_sddc) instead.
+
 ![CMake](https://github.com/ik1xpv/ExtIO_sddc/workflows/CMake/badge.svg)
 
 ## RX-888 Documents and Support
