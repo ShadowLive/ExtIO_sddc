@@ -185,7 +185,7 @@ bool RadioHandlerClass::Start(int srate_idx)
 bool RadioHandlerClass::Stop()
 {
 	std::unique_lock<std::mutex> lk(stop_mutex);
-	DbgPrintf("RadioHandlerClass::Stop %d\n", run);
+	DbgPrintf("RadioHandlerClass::Stop %d\n", static_cast<bool>(run));
 	if (run)
 	{
 		run = false; // now waits for threads

@@ -14,14 +14,23 @@ SET(LIBCPPUNIT_INCLUDE_DIRS ${SOURCE_DIR})
 
 file(GLOB UNITTESTS "./*.cpp")
 
-add_executable(unittest ${UNITTESTS})
+# Build libsddc.cpp directly into unittest with test hooks enabled
+# This allows testing of internal buffer operations
+set(LIBSDDC_TEST_SOURCES
+    "../libsddc/libsddc.cpp"
+)
+
+add_executable(unittest ${UNITTESTS} ${LIBSDDC_TEST_SOURCES})
 add_dependencies(unittest LIBCPPUNIT)
 
 target_include_directories(unittest PUBLIC "${LIBFFTW_INCLUDE_DIR}")
 target_link_directories(unittest PUBLIC "${LIBFFTW_LIBRARY_DIRS}")
 
-include_directories("." "../Core")
+include_directories("." "../Core" "../libsddc")
 include_directories(${LIBCPPUNIT_INCLUDE_DIRS})
+
+# Enable libsddc test hooks for buffer testing
+target_compile_definitions(unittest PRIVATE LIBSDDC_TESTING)
 
 target_link_libraries(unittest PRIVATE SDDC_CORE)
 if (MSVC)

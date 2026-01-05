@@ -723,3 +723,103 @@ uint32_t sddc_gpio_att_sel1(void) { return ATT_SEL1; }
 uint32_t sddc_gpio_led_yellow(void) { return LED_YELLOW; }
 uint32_t sddc_gpio_led_red(void) { return LED_RED; }
 uint32_t sddc_gpio_led_blue(void) { return LED_BLUE; }
+
+/* ============================================================================
+ * TEST HOOKS
+ * These functions are only compiled when LIBSDDC_TESTING is defined.
+ * They expose internal buffer operations for unit testing.
+ * ============================================================================ */
+#ifdef LIBSDDC_TESTING
+
+extern "C" {
+
+void sddc_test_reset_sync_buffer(void)
+{
+    std::lock_guard<std::mutex> lock(sync_mutex);
+    sync_write_pos = 0;
+    sync_read_pos = 0;
+    sync_available = 0;
+    memset(sync_buffer, 0, sizeof(sync_buffer));
+}
+
+void sddc_test_write_sync_buffer(const uint8_t* data, size_t len)
+{
+    // Simulates the write logic from the Callback function
+    constexpr size_t buffer_size = sizeof(sync_buffer);
+
+    std::lock_guard<std::mutex> lock(sync_mutex);
+
+    // Calculate contiguous space from write position to end of buffer
+    size_t to_end = buffer_size - sync_write_pos;
+
+    if (len <= to_end) {
+        // Data fits in one contiguous block
+        memcpy(&sync_buffer[sync_write_pos], data, len);
+        sync_write_pos = (sync_write_pos + len) % buffer_size;
+    } else {
+        // Data wraps around - copy in two parts
+        memcpy(&sync_buffer[sync_write_pos], data, to_end);
+        memcpy(sync_buffer, data + to_end, len - to_end);
+        sync_write_pos = len - to_end;
+    }
+
+    // Update available count, handling overflow
+    if (sync_available + len <= buffer_size) {
+        sync_available += len;
+    } else {
+        // Buffer overflow - discard old data
+        size_t overflow = (sync_available + len) - buffer_size;
+        sync_read_pos = (sync_read_pos + overflow) % buffer_size;
+        sync_available = buffer_size;
+    }
+
+    sync_cv.notify_one();
+}
+
+size_t sddc_test_read_sync_buffer(uint8_t* data, size_t max_len)
+{
+    // Simulates the read logic from sddc_read_sync (but without timeout wait)
+    std::lock_guard<std::mutex> lock(sync_mutex);
+
+    if (sync_available == 0) {
+        return 0;  // No data available
+    }
+
+    // Read available data using memcpy
+    size_t to_read = std::min(max_len, sync_available);
+    constexpr size_t buffer_size = sizeof(sync_buffer);
+
+    // Calculate contiguous data from read position to end of buffer
+    size_t to_end = buffer_size - sync_read_pos;
+
+    if (to_read <= to_end) {
+        // Data is in one contiguous block
+        memcpy(data, &sync_buffer[sync_read_pos], to_read);
+        sync_read_pos = (sync_read_pos + to_read) % buffer_size;
+    } else {
+        // Data wraps around - copy in two parts
+        memcpy(data, &sync_buffer[sync_read_pos], to_end);
+        memcpy(data + to_end, sync_buffer, to_read - to_end);
+        sync_read_pos = to_read - to_end;
+    }
+    sync_available -= to_read;
+
+    return to_read;
+}
+
+void sddc_test_get_buffer_state(size_t* write_pos, size_t* read_pos, size_t* available)
+{
+    std::lock_guard<std::mutex> lock(sync_mutex);
+    if (write_pos) *write_pos = sync_write_pos;
+    if (read_pos) *read_pos = sync_read_pos;
+    if (available) *available = sync_available;
+}
+
+size_t sddc_test_get_buffer_size(void)
+{
+    return sizeof(sync_buffer);
+}
+
+}  // extern "C"
+
+#endif  // LIBSDDC_TESTING
