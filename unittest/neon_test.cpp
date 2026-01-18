@@ -80,7 +80,11 @@ static inline void convert_float_scalar(const int16_t* __restrict input, float* 
 }
 
 // Complex type for testing (interleaved real/imag)
-typedef float complex_pair[2];
+struct complex_pair {
+    float data[2];
+    float& operator[](int i) { return data[i]; }
+    const float& operator[](int i) const { return data[i]; }
+};
 
 static inline void shift_freq_neon(complex_pair* __restrict dest,
                                    const complex_pair* __restrict source1,
@@ -89,7 +93,7 @@ static inline void shift_freq_neon(complex_pair* __restrict dest,
 {
     int m = start;
 
-    const float sign_array[4] = {1.0f, -1.0f, 1.0f, -1.0f};
+    const float sign_array[4] = {-1.0f, 1.0f, -1.0f, 1.0f};
     float32x4_t sign_mask = vld1q_f32(sign_array);
 
     for (; m + 1 < end; m += 2)
@@ -97,8 +101,16 @@ static inline void shift_freq_neon(complex_pair* __restrict dest,
         float32x4_t s1 = vld1q_f32(reinterpret_cast<const float*>(&source1[m]));
         float32x4_t s2 = vld1q_f32(reinterpret_cast<const float*>(&source2[m]));
 
-        float32x4_t s1_rr = vuzp1q_f32(s1, s1);
-        float32x4_t s1_ii = vuzp2q_f32(s1, s1);
+        // Extract and duplicate real/imaginary parts
+        float32x2_t s1_lo = vget_low_f32(s1);   // [a0, b0]
+        float32x2_t s1_hi = vget_high_f32(s1);  // [a1, b1]
+
+        // Duplicate real parts: [a0,a0,a1,a1]
+        float32x4_t s1_rr = vcombine_f32(vdup_lane_f32(s1_lo, 0), vdup_lane_f32(s1_hi, 0));
+
+        // Duplicate imaginary parts: [b0,b0,b1,b1]
+        float32x4_t s1_ii = vcombine_f32(vdup_lane_f32(s1_lo, 1), vdup_lane_f32(s1_hi, 1));
+
         float32x4_t s2_ir = vrev64q_f32(s2);
 
         float32x4_t ac_ad = vmulq_f32(s1_rr, s2);

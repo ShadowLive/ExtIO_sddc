@@ -95,8 +95,9 @@ static inline void shift_freq_neon(fftwf_complex* __restrict dest,
 {
     int m = start;
 
-    // Sign mask for simulating addsub: {1.0, -1.0, 1.0, -1.0}
-    const float sign_array[4] = {1.0f, -1.0f, 1.0f, -1.0f};
+    // Sign mask for complex multiplication: {-1.0, 1.0, -1.0, 1.0}
+    // This gives us [ac-bd, ad+bc, ...] when combined properly
+    const float sign_array[4] = {-1.0f, 1.0f, -1.0f, 1.0f};
     float32x4_t sign_mask = vld1q_f32(sign_array);
 
     // Process 2 complex numbers at a time (4 floats)
@@ -111,11 +112,15 @@ static inline void shift_freq_neon(fftwf_complex* __restrict dest,
         // s1 = [a0,b0,a1,b1]
         // s2 = [c0,d0,c1,d1]
 
+        // Extract real and imaginary parts
+        float32x2_t s1_lo = vget_low_f32(s1);   // [a0, b0]
+        float32x2_t s1_hi = vget_high_f32(s1);  // [a1, b1]
+
         // Duplicate real parts: [a0,a0,a1,a1]
-        float32x4_t s1_rr = vuzp1q_f32(s1, s1); // Equivalent to moveldup on x86
+        float32x4_t s1_rr = vcombine_f32(vdup_lane_f32(s1_lo, 0), vdup_lane_f32(s1_hi, 0));
 
         // Duplicate imaginary parts: [b0,b0,b1,b1]
-        float32x4_t s1_ii = vuzp2q_f32(s1, s1); // Equivalent to movehdup on x86
+        float32x4_t s1_ii = vcombine_f32(vdup_lane_f32(s1_lo, 1), vdup_lane_f32(s1_hi, 1));
 
         // Swap pairs in s2: [d0,c0,d1,c1]
         float32x4_t s2_ir = vrev64q_f32(s2);

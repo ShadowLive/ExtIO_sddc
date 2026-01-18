@@ -1,10 +1,52 @@
 // Apple Accelerate Backend Implementation
 // Uses vDSP for FFT operations on macOS/iOS
 
-#include "fft_backend.h"
-#include <Accelerate/Accelerate.h>
+// Include only what we need to avoid conflicts
+#include <complex>
+#include <cstddef>
 #include <cstring>
 #include <cstdlib>
+
+// Define our types before including Accelerate
+using fft_complex = std::complex<float>;
+typedef void* FFTPlanHandle;
+
+// FFT direction enum (avoiding name conflict with vDSP's FFTDirection typedef)
+enum class FFT_Dir {
+    Forward,
+    Backward
+};
+
+// Forward declare the backend class
+class FFTBackend;
+
+// Now include Accelerate which has its own FFTDirection typedef
+#include <Accelerate/Accelerate.h>
+
+// Save vDSP's constants
+namespace vdsp {
+    constexpr int Forward = FFT_FORWARD;
+    constexpr int Inverse = FFT_INVERSE;
+}
+
+// Abstract FFT backend interface (copied from fft_backend.h to avoid conflict)
+class FFTBackend {
+public:
+    virtual ~FFTBackend() = default;
+    virtual const char* name() const = 0;
+    virtual FFTPlanHandle plan_r2c(int n, float* in, fft_complex* out) = 0;
+    virtual FFTPlanHandle plan_c2c(int n, fft_complex* in, fft_complex* out, FFT_Dir dir) = 0;
+    virtual void execute_r2c(FFTPlanHandle plan, float* in, fft_complex* out) = 0;
+    virtual void execute_c2c(FFTPlanHandle plan, fft_complex* in, fft_complex* out) = 0;
+    virtual void destroy_plan(FFTPlanHandle plan) = 0;
+    virtual void import_wisdom(const char* filename) { (void)filename; }
+    virtual void export_wisdom(const char* filename) { (void)filename; }
+    virtual void* alloc(size_t bytes) = 0;
+    virtual void free(void* ptr) = 0;
+};
+
+// Factory function (declared in fft_backend.h but we can't include it due to FFTDirection conflict)
+FFTBackend* getFFTBackend();
 
 // Internal plan wrapper for vDSP
 struct AcceleratePlan {
@@ -52,7 +94,7 @@ public:
         return static_cast<FFTPlanHandle>(p);
     }
 
-    FFTPlanHandle plan_c2c(int n, fft_complex* in, fft_complex* out, FFTDirection dir) override {
+    FFTPlanHandle plan_c2c(int n, fft_complex* in, fft_complex* out, FFT_Dir dir) override {
         auto* p = new AcceleratePlan();
         p->is_r2c = false;
 
@@ -86,15 +128,11 @@ public:
         input_split.realp = in;
         input_split.imagp = in + 1;
 
-        // Perform R2C FFT (actually uses vDSP_fft_zrip which is optimized for real input)
-        // Note: vDSP_fft_zrip expects data in a packed format
-        // We need to use vDSP_ctoz to convert interleaved to split, then vDSP_fft_zop
-
         // Convert input (reinterpreted as interleaved complex) to split format
         vDSP_ctoz(reinterpret_cast<DSPComplex*>(in), 2, &plan->split_buffer, 1, 1 << (plan->log2n - 1));
 
-        // Perform FFT
-        vDSP_fft_zrip(plan->setup, &plan->split_buffer, 1, plan->log2n, FFT_FORWARD);
+        // Perform FFT using vDSP constant
+        vDSP_fft_zrip(plan->setup, &plan->split_buffer, 1, plan->log2n, vdsp::Forward);
 
         // Scale the output (vDSP doesn't scale by default)
         float scale = 0.5f;
@@ -106,8 +144,9 @@ public:
 
         // Handle DC and Nyquist components
         int n = 1 << plan->log2n;
-        out[n/2][0] = plan->split_buffer.imagp[0]; // Nyquist
-        out[n/2][1] = 0.0f;
+        float* out_floats = reinterpret_cast<float*>(out);
+        out_floats[n] = plan->split_buffer.imagp[0]; // Nyquist real part
+        out_floats[n + 1] = 0.0f; // Nyquist imaginary part
     }
 
     void execute_c2c(FFTPlanHandle handle, fft_complex* in, fft_complex* out) override {
@@ -117,9 +156,9 @@ public:
         // Convert interleaved complex input to split-complex format
         vDSP_ctoz(reinterpret_cast<DSPComplex*>(in), 2, &plan->split_buffer, 1, n);
 
-        // Perform C2C FFT (forward direction, vDSP doesn't distinguish in the API)
+        // Perform C2C FFT (use inverse for backward transform to match FFTW convention)
         vDSP_fft_zop(plan->setup, &plan->split_buffer, 1, &plan->split_buffer, 1,
-                     plan->log2n, FFT_FORWARD);
+                     plan->log2n, vdsp::Inverse);
 
         // Convert split-complex back to interleaved format
         vDSP_ztoc(&plan->split_buffer, 1, reinterpret_cast<DSPComplex*>(out), 2, n);

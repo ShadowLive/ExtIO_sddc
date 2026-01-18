@@ -94,6 +94,11 @@ if(FFT_BACKEND STREQUAL "MKL")
 elseif(FFT_BACKEND STREQUAL "Accelerate")
     target_compile_definitions(SDDC_CORE PUBLIC FFT_BACKEND_ACCELERATE)
     if(APPLE)
+        # Still need FFTW headers and libraries for type definitions and direct FFT calls
+        # (The code hasn't been fully abstracted to use only the FFT backend interface yet)
+        target_include_directories(SDDC_CORE PUBLIC "${LIBFFTW_INCLUDE_DIRS}")
+        target_link_directories(SDDC_CORE PUBLIC "${LIBFFTW_LIBRARY_DIRS}")
+        target_link_libraries(SDDC_CORE PUBLIC ${LIBFFTW_LIBRARIES})
         # Link Apple Accelerate framework
         target_link_libraries(SDDC_CORE PUBLIC "-framework Accelerate")
     else()
