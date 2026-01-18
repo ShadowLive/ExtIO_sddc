@@ -1,6 +1,7 @@
 #include "libsddc.h"
 #include "config.h"
 #include "RadioHandler.h"
+#include "arch/linux/usb_device.h"
 #include <cmath>
 #include <cstring>
 #include <cstdarg>
@@ -131,20 +132,77 @@ int sddc_get_device_count()
 
 int sddc_get_device_info(struct sddc_device_info **sddc_device_infos)
 {
-    auto ret = new sddc_device_info();
-    const char *todo = "TODO";
-    ret->manufacturer = todo;
-    ret->product = todo;
-    ret->serial_number = todo;
+    if (sddc_device_infos == nullptr) {
+        set_error(-1, "sddc_device_infos is a null pointer");
+        return -1;
+    }
+
+    // Get USB device list from low-level USB layer
+    struct usb_device_info *usb_infos = nullptr;
+    int count = usb_device_get_device_list(&usb_infos);
+
+    if (count < 0) {
+        set_error(-2, "Failed to get USB device list");
+        return -1;
+    }
+
+    if (count == 0) {
+        *sddc_device_infos = nullptr;
+        return 0;
+    }
+
+    // Allocate array for sddc_device_info (count + 1 for sentinel)
+    auto ret = new sddc_device_info[count + 1];
+
+    // Copy device info from USB layer to sddc layer
+    for (int i = 0; i < count; i++) {
+        // Use strdup to allocate and copy strings (caller must free with sddc_free_device_info)
+        if (usb_infos[i].manufacturer) {
+            ret[i].manufacturer = strdup((const char*)usb_infos[i].manufacturer);
+        } else {
+            ret[i].manufacturer = strdup("Unknown");
+        }
+
+        if (usb_infos[i].product) {
+            ret[i].product = strdup((const char*)usb_infos[i].product);
+        } else {
+            ret[i].product = strdup("Unknown");
+        }
+
+        if (usb_infos[i].serial_number) {
+            ret[i].serial_number = strdup((const char*)usb_infos[i].serial_number);
+        } else {
+            ret[i].serial_number = strdup("");
+        }
+    }
+
+    // Add sentinel (NULL terminator)
+    ret[count].manufacturer = nullptr;
+    ret[count].product = nullptr;
+    ret[count].serial_number = nullptr;
+
+    // Free USB device list (we've copied the strings)
+    usb_device_free_device_list(usb_infos);
 
     *sddc_device_infos = ret;
-
-    return 1;
+    return count;
 }
 
 int sddc_free_device_info(struct sddc_device_info *sddc_device_infos)
 {
-    delete sddc_device_infos;
+    if (sddc_device_infos == nullptr) {
+        return 0;
+    }
+
+    // Free each string in the array
+    for (int i = 0; sddc_device_infos[i].manufacturer != nullptr; i++) {
+        free((void*)sddc_device_infos[i].manufacturer);
+        free((void*)sddc_device_infos[i].product);
+        free((void*)sddc_device_infos[i].serial_number);
+    }
+
+    // Free the array itself
+    delete[] sddc_device_infos;
     return 0;
 }
 

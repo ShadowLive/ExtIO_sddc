@@ -39,6 +39,3 @@ The value is high enough to not disturb use of GPIOs for other purpose after det
 
 
 */
-
-
-// TODO

@@ -114,6 +114,34 @@ The Apple Silicon build includes ARM NEON intrinsics for maximum performance.
     \libsddc\        > libsddc lib
     \SDDC_FX3\          > Firmware sources
 
+## Hardware Compatibility
+
+### ⚠️ Important: RX-888 Mk II Specific Fork
+
+This fork has been specifically optimized for the **RX-888 Mk II** and contains changes that have **not been tested** on other hardware models.
+
+| Hardware Model | Compatibility | Notes |
+|----------------|---------------|-------|
+| **RX-888 Mk II** | ✅ **Full Support** | Primary target platform, all features tested |
+| RX-888 (original) | ⚠️ **Untested** | Should work but VHF fixes are Mk II-specific |
+| RX-888R2 | ⚠️ **Untested** | R828D tuner support present but not verified |
+| RX-888R3 | ⚠️ **Untested** | May work but optimizations not validated |
+| HF103 | ⚠️ **Untested** | HF-only mode, no VHF tuner changes apply |
+| BBRF103 | ⚠️ **Untested** | Similar to HF103, VHF changes not applicable |
+| RX999 | ⚠️ **Untested** | No tuner, may work for direct sampling |
+
+**If you are using hardware other than RX-888 Mk II,** we recommend using the [upstream repository](https://github.com/ik1xpv/ExtIO_sddc) for better compatibility.
+
+### Fork-Specific Changes
+
+The following changes are specific to the RX-888 Mk II and may not apply to other hardware:
+
+1. **VHF Spectrum Mirroring Fix** - Corrects R828D low-side injection behavior (Mk II specific)
+2. **Performance Optimizations** - Tested only on Mk II hardware
+3. **API Enhancements** - VGA gain control may behave differently on other models
+
+---
+
 ## Fork Change Log
 
 ### RX-888 Mk II Fork (January 2026)

@@ -22,6 +22,34 @@
 #include <stdlib.h>
 #include <time.h>
 #include <assert.h>
+#include <stdint.h>
+
+/* Endianness detection and conversion */
+static inline int is_big_endian(void) {
+    union {
+        uint32_t i;
+        char c[4];
+    } test = {0x01020304};
+    return test.c[0] == 1;
+}
+
+/* Convert 16-bit value between big/little endian */
+static inline uint16_t byteswap16(uint16_t val) {
+    return (val << 8) | (val >> 8);
+}
+
+/* Convert buffer of 16-bit samples to little-endian (WAV format)
+ * Returns 1 if conversion was performed, 0 if not needed */
+static int convert_to_little_endian_16(int16_t *data, size_t count) {
+    if (is_big_endian()) {
+        for (size_t i = 0; i < count; i++) {
+            uint16_t *p = (uint16_t*)&data[i];
+            *p = byteswap16(*p);
+        }
+        return 1;
+    }
+    return 0;
+}
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -173,12 +201,15 @@ int  waveWriteSamples(FILE* f,  void * vpData, size_t numSamples, int needCleanD
 		waveDataSize += sizeof(uint8_t) * numSamples;
 		return (nw == numSamples) ? 0 : 1;
 	case 16:
-		/* TODO: endian conversion needed */
-		nw = fwrite(vpData, sizeof(int16_t), numSamples, f);
-		waveDataSize += sizeof(int16_t) * numSamples;
-		if ( needCleanData )
+		/* WAV files are always little-endian, convert if needed */
 		{
-			/* TODO: convert back endianness */
+			int did_convert = convert_to_little_endian_16((int16_t*)vpData, numSamples);
+			nw = fwrite(vpData, sizeof(int16_t), numSamples, f);
+			waveDataSize += sizeof(int16_t) * numSamples;
+			/* Restore original endianness if conversion was done and caller needs clean data */
+			if (needCleanData && did_convert) {
+				convert_to_little_endian_16((int16_t*)vpData, numSamples);
+			}
 		}
 		return (nw == numSamples) ? 0 : 1;
 	}
@@ -198,12 +229,16 @@ int  waveWriteFrames(FILE* f,  void * vpData, size_t numFrames, int needCleanDat
 		waveDataSize += waveHdr.f.nChannels * sizeof(uint8_t) * numFrames;
 		return (nw == numFrames) ? 0 : 1;
 	case 16:
-		/* TODO: endian conversion needed */
-		nw = fwrite(vpData, waveHdr.f.nChannels * sizeof(int16_t), numFrames, f);
-		waveDataSize += waveHdr.f.nChannels * sizeof(int16_t) * numFrames;
-		if ( needCleanData )
+		/* WAV files are always little-endian, convert if needed */
 		{
-			/* TODO: convert back endianness */
+			size_t total_samples = numFrames * waveHdr.f.nChannels;
+			int did_convert = convert_to_little_endian_16((int16_t*)vpData, total_samples);
+			nw = fwrite(vpData, waveHdr.f.nChannels * sizeof(int16_t), numFrames, f);
+			waveDataSize += waveHdr.f.nChannels * sizeof(int16_t) * numFrames;
+			/* Restore original endianness if conversion was done and caller needs clean data */
+			if (needCleanData && did_convert) {
+				convert_to_little_endian_16((int16_t*)vpData, total_samples);
+			}
 		}
 		return (nw == numFrames) ? 0 : 1;
 	}
