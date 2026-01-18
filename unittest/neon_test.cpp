@@ -80,7 +80,8 @@ static inline void convert_float_scalar(const int16_t* __restrict input, float* 
 }
 
 // Complex type for testing (interleaved real/imag)
-struct complex_pair {
+// Ensure no padding and 8-byte alignment
+struct __attribute__((packed, aligned(8))) complex_pair {
     float data[2];
     float& operator[](int i) { return data[i]; }
     const float& operator[](int i) const { return data[i]; }
@@ -277,7 +278,8 @@ TEST_CASE(NeonOptimizations, ShiftFreqCorrectness)
     shift_freq_neon(dest_neon.data(), source1.data(), source2.data(), 0, size);
     shift_freq_scalar(dest_scalar.data(), source1.data(), source2.data(), 0, size);
 
-    const float tolerance = 1e-6f;
+    // Use 1e-5 tolerance for single-precision FP (NEON and scalar accumulate rounding differently)
+    const float tolerance = 1e-5f;
     for (int i = 0; i < size; i++) {
         float diff_real = std::abs(dest_neon[i][0] - dest_scalar[i][0]);
         float diff_imag = std::abs(dest_neon[i][1] - dest_scalar[i][1]);
