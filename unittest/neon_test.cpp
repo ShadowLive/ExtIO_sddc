@@ -117,8 +117,8 @@ static inline void shift_freq_neon(complex_pair* __restrict dest,
         float32x4_t ac_ad = vmulq_f32(s1_rr, s2);
         float32x4_t bd_bc = vmulq_f32(s1_ii, s2_ir);
 
-        bd_bc = vmulq_f32(bd_bc, sign_mask);
-        float32x4_t result = vaddq_f32(ac_ad, bd_bc);
+        // Use FMA for better performance and precision
+        float32x4_t result = vfmaq_f32(ac_ad, bd_bc, sign_mask);
 
         vst1q_f32(reinterpret_cast<float*>(&dest[m]), result);
     }

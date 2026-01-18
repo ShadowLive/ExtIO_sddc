@@ -59,7 +59,8 @@ else()
     list(APPEND SRC fft_mt_r2iq_neon.cpp)
     # On Apple Silicon (arm64) clang does not accept '-mfpu='; NEON is enabled by default.
     if(APPLE)
-      # Don't pass -mfpu to Apple clang; only enable PFFFT's NEON code path and relax strict-aliasing warnings
+      # Don't pass -mfpu to Apple clang; NEON is enabled by default
+      # Note: Aggressive flags like -ffast-math can hurt FFT performance
       set_source_files_properties(fft_mt_r2iq_neon.cpp PROPERTIES COMPILE_FLAGS "")
       set_source_files_properties(pffft/pf_mixer.cpp PROPERTIES COMPILE_FLAGS "-D PFFFT_ENABLE_NEON -Wno-strict-aliasing")
     else()

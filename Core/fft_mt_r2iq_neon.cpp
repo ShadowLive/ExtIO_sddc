@@ -131,10 +131,9 @@ static inline void shift_freq_neon(fftwf_complex* __restrict dest,
         // Compute: s1_ii * s2_ir = [b*d, b*c, ...]
         float32x4_t bd_bc = vmulq_f32(s1_ii, s2_ir);
 
-        // Simulate addsub using multiply with sign mask
-        // Result: [ac-bd, ad+bc, ...]
-        bd_bc = vmulq_f32(bd_bc, sign_mask);
-        float32x4_t result = vaddq_f32(ac_ad, bd_bc);
+        // Use FMA (fused multiply-add) for better performance and precision
+        // Result: ac_ad + (bd_bc * sign_mask) = [ac-bd, ad+bc, ...]
+        float32x4_t result = vfmaq_f32(ac_ad, bd_bc, sign_mask);
 
         vst1q_f32(reinterpret_cast<float*>(&dest[m]), result);
     }
