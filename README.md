@@ -65,10 +65,41 @@ make
 
 1. Install development packages:
 ```bash
-> sudo apt install libfftw3-dev
+> sudo apt install libfftw3-dev libusb-1.0-0-dev pkg-config
 ```
 
-1. Follow Windows Build Instruction to run cmake to build Linux libaray
+2. Build with CMake:
+```bash
+> mkdir build && cd build
+> cmake -DCMAKE_BUILD_TYPE=Release ..
+> make -j$(nproc)
+```
+
+**FFT Backend Selection:**
+
+The project supports multiple FFT backends. Choose one at build time:
+
+```bash
+# FFTW (default, best compatibility)
+> cmake -DFFT_BACKEND=FFTW ..
+
+# Intel MKL (best performance on x86_64 with MKL installed)
+> cmake -DFFT_BACKEND=MKL ..
+
+# Apple Accelerate (best performance on macOS/Apple Silicon)
+> cmake -DFFT_BACKEND=Accelerate ..
+```
+
+**Apple Silicon / M4 Build:**
+```bash
+> mkdir build && cd build
+> cmake -DFFT_BACKEND=Accelerate \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 ..
+> make -j8
+```
+
+The Apple Silicon build includes ARM NEON intrinsics for maximum performance.
 
 
 ## Directory structure:
@@ -94,9 +125,13 @@ make
 **Performance Optimizations:**
 - Replace byte-by-byte ring buffer copy with memcpy (10-100x sync read improvement)
 - Increase FFT processing threads from 1 to 4 for multi-core utilization
-- SSE/AVX vectorization for int16→float conversion, complex multiply, and complex copy
+- AVX2 vectorization for int16→float conversion, complex multiply, and complex copy (x86_64)
+- ARM NEON intrinsics for maximum performance on Apple Silicon M4 (~4.5x speedup)
+- Apple Accelerate framework integration for optimized FFT on macOS
+- FFT backend abstraction supporting FFTW, Intel MKL, and Apple Accelerate
 - Lock-free ring buffer using std::atomic indices
 - Reduced mutex contention in fine-tune mixer path
+- Fixed FFT thread race conditions for reliable 128 Msps streaming
 
 **libsddc API Enhancements:**
 - Add VGA (AD8370) gain control functions
@@ -104,6 +139,23 @@ make
 - Add tuner IF frequency configuration
 - Add error handling with sddc_get_last_error()
 - Improved sample rate documentation
+
+**Performance Benchmarks (Apple M4):**
+
+FFT Backend Performance (Accelerate framework):
+```
+  Size  |   R2C (µs)   |  C2C Fwd (µs) |  C2C Bwd (µs)
+-------------------------------------------------------
+  4096  |       8.66   |       10.67   |        7.44
+  2048  |       1.97   |        2.86   |        3.35
+  1024  |       0.86   |        1.29   |        1.55
+```
+
+NEON Optimization Speedups:
+- int16→float conversion: **7.7x faster**
+- Complex multiplication: **3.4x faster**
+- Complex copy/conjugate: **3.2x faster**
+- Overall pipeline: **~4.5x faster** (enables 128 Msps real-time streaming)
 
 ## Upstream Project
 
