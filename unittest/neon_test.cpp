@@ -1,3 +1,5 @@
+#include <limits>
+#include <cstdint>
 #include "CppUnitTestFramework.hpp"
 #include <vector>
 #include <cmath>
