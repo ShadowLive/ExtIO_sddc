@@ -15,6 +15,10 @@ if(NOT CMAKE_BUILD_TYPE)
 endif(NOT CMAKE_BUILD_TYPE)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE} " - Version: " ${VERSION} " / " ${LIBVER})
 
+# Note: Link-Time Optimization (LTO) was tested but caused 38% performance regression
+# Likely due to incorrect compiler assumptions in FFT-heavy numerical code
+# Keeping it disabled for optimal performance
+
 # allow disabling optimizations - for debug reasons
 option(USE_SIMD_OPTIMIZATIONS "enable SIMD optimizations" ON)
 

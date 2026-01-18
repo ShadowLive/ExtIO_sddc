@@ -49,6 +49,23 @@ float32x4_t result = vfmaq_f32(ac_ad, bd_bc, sign_mask);
 
 ---
 
+### 3. Link-Time Optimization (LTO) - **38% Regression**
+**Status:** ❌ Tested and rejected
+
+**What:** Enabled CMake's `INTERPROCEDURAL_OPTIMIZATION` (LTO/IPO)
+
+**Result:** Performance degraded by 38.6% (29.41 µs → 40.77 µs)
+
+**Why it failed:**
+- LTO can make incorrect assumptions about numerical code
+- FFT libraries (Accelerate) may not benefit from cross-module inlining
+- SIMD intrinsics can be mis-optimized during link-time analysis
+- Performance-critical paths may be de-optimized
+
+**Lesson:** LTO is NOT always beneficial - test before assuming it helps!
+
+---
+
 ## 📊 Overall Performance Summary
 
 ### Current Optimization Stack (Apple M4)
@@ -153,27 +170,37 @@ dest = (fftwf_complex*)__builtin_assume_aligned(dest, 64);
 
 ### Priority 1: Easy Wins
 1. ✅ **FMA instructions** - DONE (4.7% gain)
-2. 📋 **LTO (Link-Time Optimization)** - Low risk, 5-15% potential
-3. 📋 **Remove `-O3` redundancy** - May help with code size
+2. ❌ **LTO (Link-Time Optimization)** - TESTED, caused 38% regression
+3. 📋 **Profile-Guided Optimization** - Worth trying but risky
 
-### Priority 2: Medium Effort
-4. 📋 **Profile-Guided Optimization** - Requires workload profiling
-5. 📋 **Prefetching for large buffers** - 3-8% for large transfers
-6. 📋 **Memory alignment hints** - 2-5% potential
+### Priority 2: Medium Effort (Proceed with Caution)
+4. 📋 **Prefetching for large buffers** - 3-8% potential, test carefully
+5. 📋 **Memory alignment hints** - 2-5% potential
+6. 📋 **Remove redundant optimization flags** - Cleanup
 
-### Priority 3: Advanced
+### Priority 3: Advanced (High Risk)
 7. 📋 **FCMLA instructions** - Need to verify M4 support
 8. 📋 **Loop unrolling tuning** - May already be optimal
-9. 📋 **AMX coprocessor** - Only via Accelerate (already using)
+9. ❌ **AMX coprocessor** - Only via Accelerate (already using)
+
+### ⚠️ WARNING: Test All Optimizations!
+This codebase has proven sensitive to optimizations:
+- LTO: 38% slower ❌
+- -ffast-math: 24% slower ❌
+- FMA: 4.7% faster ✅
+
+**Always benchmark before and after!**
 
 ---
 
 ## 🚫 What NOT to Do
 
-❌ **Don't use `-ffast-math`** - Breaks FFT performance
+❌ **Don't use `-ffast-math`** - Breaks FFT performance (24% slower)
+❌ **Don't enable LTO/IPO** - Hurts numerical code (38% slower)
 ❌ **Don't use overly specific `-mcpu`** - Can hurt performance
 ❌ **Don't add SIMD without testing** - Scalar may be faster
 ❌ **Don't optimize without benchmarks** - Measure, don't guess
+❌ **Don't assume "standard" optimizations work** - This codebase is sensitive!
 
 ---
 
