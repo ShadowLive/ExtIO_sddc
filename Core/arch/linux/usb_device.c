@@ -361,6 +361,9 @@ void usb_device_close(usb_device_t *this)
 
 int usb_device_handle_events(usb_device_t *this)
 {
+  if (this == NULL) {
+    return -1;
+  }
   return libusb_handle_events_completed(this->context, &this->completed);
 }
 
@@ -371,6 +374,11 @@ int usb_device_control(usb_device_t *this, uint8_t request, uint16_t value,
   const uint8_t bmReadRequestType = LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE;
   const unsigned int timeout = 5000;        // timeout (in ms) for each command
   int ret;
+
+  // Check for null device (no USB device connected)
+  if (this == NULL || this->dev_handle == NULL) {
+    return -1;
+  }
 
   if (!read) {
       ret = libusb_control_transfer(this->dev_handle, bmWriteRequestType,

@@ -52,6 +52,8 @@ FFTBackend* getFFTBackend();
 // Backend name macro for compile-time identification
 #if defined(FFT_BACKEND_MKL)
     #define FFT_BACKEND_NAME "MKL"
+#elif defined(FFT_BACKEND_ACCELERATE)
+    #define FFT_BACKEND_NAME "Accelerate"
 #else
     #define FFT_BACKEND_NAME "FFTW"
 #endif

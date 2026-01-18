@@ -10,7 +10,7 @@
 
 using namespace std::chrono;
 
-class fx3handler : public fx3class
+class MockFx3Handler : public fx3class
 {
     bool Open()
     {
@@ -55,9 +55,19 @@ class fx3handler : public fx3class
         return true;
     }
 
-    std::thread emuthread;
-    bool run;
-	long nxfers;
+    std::thread emuthread{};
+    bool run = false;
+    long nxfers = 0;
+
+public:
+    MockFx3Handler() = default;
+    ~MockFx3Handler() {
+        if (emuthread.joinable()) {
+            run = false;
+            emuthread.join();
+        }
+    }
+
     void StartStream(ringbuffer<int16_t>& input, int numofblock)
     {
         input.setBlockSize(transferSamples);
@@ -76,9 +86,11 @@ class fx3handler : public fx3class
 
 	void StopStream() {
         run = false;
-        emuthread.join();
+        if (emuthread.joinable()) {
+            emuthread.join();
+        }
     }
-public:
+
 	long Xfers(bool clear) { long rv=nxfers; if (clear) nxfers=0; return rv; }
 };
 
@@ -97,7 +109,7 @@ namespace {
 
 TEST_CASE(CoreFixture, BasicTest)
 {
-    auto usb = new fx3handler();
+    auto usb = new MockFx3Handler();
 
     auto radio = new RadioHandlerClass();
 
@@ -136,7 +148,7 @@ TEST_CASE(CoreFixture, BasicTest)
 
 TEST_CASE(CoreFixture, R2IQTest)
 {
-    auto usb = new fx3handler();
+    auto usb = new MockFx3Handler();
 
     auto radio = new RadioHandlerClass();
 
@@ -163,7 +175,7 @@ TEST_CASE(CoreFixture, R2IQTest)
 
 TEST_CASE(CoreFixture, TuneTest)
 {
-    auto usb = new fx3handler();
+    auto usb = new MockFx3Handler();
 
     auto radio = new RadioHandlerClass();
 

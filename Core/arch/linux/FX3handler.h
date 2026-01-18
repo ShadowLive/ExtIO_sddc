@@ -36,13 +36,13 @@ private:
 
 	static void PacketRead(uint32_t data_size, uint8_t *data, void *context);
 
-	uint32_t devidx;
-	struct usb_device_info *usb_device_infos;
-	usb_device_t *dev;
-	streaming_t *stream;
-	ringbuffer<int16_t> *inputbuffer;
-    bool run;
-    std::thread poll_thread;
+	uint32_t devidx = 0;
+	struct usb_device_info *usb_device_infos = nullptr;
+	usb_device_t *dev = nullptr;
+	streaming_t *stream = nullptr;
+	ringbuffer<int16_t> *inputbuffer = nullptr;
+	bool run = false;
+	std::thread poll_thread{};  // default-initialized to non-joinable
 };
 
 

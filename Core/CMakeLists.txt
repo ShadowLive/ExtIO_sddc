@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.13)
 
 # FFT Backend Selection
-# Options: FFTW (default), MKL
-set(FFT_BACKEND "FFTW" CACHE STRING "FFT backend to use (FFTW, MKL)")
-set_property(CACHE FFT_BACKEND PROPERTY STRINGS FFTW MKL)
+# Options: FFTW (default), MKL, Accelerate
+set(FFT_BACKEND "FFTW" CACHE STRING "FFT backend to use (FFTW, MKL, Accelerate)")
+set_property(CACHE FFT_BACKEND PROPERTY STRINGS FFTW MKL Accelerate)
 
 message(STATUS "FFT Backend: ${FFT_BACKEND}")
 
@@ -17,6 +17,10 @@ file(GLOB SRC "*.cpp" "radio/*.cpp" "pffft/*.cpp" ${ARCH_SRC})
 
 # Exclude FFT backend files - we'll add the selected one
 list(FILTER SRC EXCLUDE REGEX "fft_backend_.*\\.cpp$")
+# Exclude Accelerate backend file on non-Apple systems (to avoid compilation errors)
+if(NOT APPLE)
+    list(FILTER SRC EXCLUDE REGEX "fft_backend_accelerate\\.cpp$")
+endif()
 
 # Include the FFT benchmark
 list(APPEND SRC fft_benchmark.cpp)
@@ -25,6 +29,9 @@ list(APPEND SRC fft_benchmark.cpp)
 if(FFT_BACKEND STREQUAL "MKL")
     list(APPEND SRC fft_backend_mkl.cpp)
     message(STATUS "Using Intel MKL backend")
+elseif(FFT_BACKEND STREQUAL "Accelerate")
+    list(APPEND SRC fft_backend_accelerate.cpp)
+    message(STATUS "Using Apple Accelerate backend")
 else()
     # Default: FFTW
     list(APPEND SRC fft_backend_fftw.cpp)
@@ -40,6 +47,8 @@ else()
     # Assume GCC, check target CPU/FPU
   if ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
     message(STATUS "Compiling for x64")
+    # Exclude NEON file on x86_64
+    list(FILTER SRC EXCLUDE REGEX "fft_mt_r2iq_neon.cpp")
     set_source_files_properties(fft_mt_r2iq_avx.cpp PROPERTIES COMPILE_FLAGS -mavx)
     set_source_files_properties(fft_mt_r2iq_avx2.cpp PROPERTIES COMPILE_FLAGS -mavx2)
     set_source_files_properties(fft_mt_r2iq_avx512.cpp PROPERTIES COMPILE_FLAGS -mavx512f)
@@ -82,6 +91,14 @@ if(FFT_BACKEND STREQUAL "MKL")
     target_link_directories(SDDC_CORE PUBLIC "${MKL_ROOT}/lib")
     # Link MKL runtime library
     target_link_libraries(SDDC_CORE PUBLIC mkl_rt)
+elseif(FFT_BACKEND STREQUAL "Accelerate")
+    target_compile_definitions(SDDC_CORE PUBLIC FFT_BACKEND_ACCELERATE)
+    if(APPLE)
+        # Link Apple Accelerate framework
+        target_link_libraries(SDDC_CORE PUBLIC "-framework Accelerate")
+    else()
+        message(FATAL_ERROR "Accelerate backend only available on macOS")
+    endif()
 else()
     # Default: FFTW
     target_compile_definitions(SDDC_CORE PUBLIC FFT_BACKEND_FFTW)
@@ -108,6 +125,8 @@ target_compile_definitions(fft_benchmark PRIVATE FFT_BENCHMARK_MAIN)
 target_link_libraries(fft_benchmark PRIVATE SDDC_CORE)
 if(FFT_BACKEND STREQUAL "MKL")
     target_sources(fft_benchmark PRIVATE fft_backend_mkl.cpp)
+elseif(FFT_BACKEND STREQUAL "Accelerate")
+    target_sources(fft_benchmark PRIVATE fft_backend_accelerate.cpp)
 else()
     target_sources(fft_benchmark PRIVATE fft_backend_fftw.cpp)
 endif()

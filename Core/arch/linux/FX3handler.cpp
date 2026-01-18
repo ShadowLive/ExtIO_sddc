@@ -20,10 +20,18 @@ fx3handler::fx3handler()
     devidx = 0;
     usb_device_infos = nullptr;
     dev = nullptr;
+    stream = nullptr;
+    inputbuffer = nullptr;
+    run = false;
 }
 
 fx3handler::~fx3handler()
 {
+    // Stop the polling thread if it's running
+    if (poll_thread.joinable()) {
+        run = false;
+        poll_thread.join();
+    }
     Close();
 }
 
@@ -73,12 +81,25 @@ bool fx3handler::SetArgument(uint16_t index, uint16_t value)
 
 bool fx3handler::GetHardwareInfo(uint32_t *data)
 {
+    // If no device connected, return dummy hardware info
+    if (this->dev == nullptr) {
+        // Return NORADIO (0) with firmware version 202
+        *data = 0x00CA0000;  // firmware=202 (0xCA), radio=NORADIO (0)
+        return true;
+    }
     return usb_device_control(this->dev, TESTFX3, 0, 0, (uint8_t *)data, sizeof(*data), 1) == 0;
 }
 
 void fx3handler::StartStream(ringbuffer<int16_t> &input, int numofblock)
 {
     inputbuffer = &input;
+
+    // If no device connected, don't start streaming
+    if (this->dev == nullptr) {
+        DbgPrintf("StartStream: No device connected\n");
+        return;
+    }
+
     stream = streaming_open_async(this->dev, transferSize, concurrentTransfers, PacketRead, this);
     input.setBlockSize(streaming_framesize(stream) / sizeof(int16_t));
 
@@ -104,10 +125,15 @@ void fx3handler::StartStream(ringbuffer<int16_t> &input, int numofblock)
 void fx3handler::StopStream()
 {
     run = false;
-    poll_thread.join();
+    if (poll_thread.joinable()) {
+        poll_thread.join();
+    }
 
-    streaming_stop(stream);
-    streaming_close(stream);
+    if (stream) {
+        streaming_stop(stream);
+        streaming_close(stream);
+        stream = nullptr;
+    }
 }
 
 void fx3handler::PacketRead(uint32_t data_size, uint8_t *data, void *context)
